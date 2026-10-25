@@ -867,6 +867,7 @@ class MainWindow(QMainWindow):
     translate_requested = pyqtSignal(str, str, str)
     locale_changed = pyqtSignal(str)
     quit_app_requested = pyqtSignal()
+    copy_to_clipboard_requested = pyqtSignal(str)
 
     def __init__(
         self,
@@ -878,6 +879,7 @@ class MainWindow(QMainWindow):
         self._manager = translation_manager
         self._history = history
         self._clipboard = ClipboardManager()
+        self.copy_to_clipboard_requested.connect(self.set_clipboard_text)
         self._last_requested_key: tuple[str, str, str] = ("", "", "")
 
         # 1. Aggressive debounce timer for near-real-time translation (300ms)
@@ -1331,13 +1333,37 @@ class MainWindow(QMainWindow):
         self.set_loading(False)
         self._update_status_bar()
 
+    def set_clipboard_text(self, text: str) -> bool:
+        """Slot executed strictly on the main GUI thread to safely set clipboard."""
+        if not text:
+            return False
+
+        success = False
+        try:
+            app = QApplication.instance()
+            if app is not None:
+                cb = app.clipboard()
+                if cb is not None:
+                    cb.setText(text)
+                    if cb.text() == text:
+                        success = True
+        except Exception as exc:
+            logger.debug("Failed setting QClipboard on main thread: %s", exc)
+
+        # If QClipboard failed or compositor denied focus, fallback to native wl-copy/xclip
+        if not success:
+            return self._clipboard.copy_to_clipboard(text, force_native=True)
+
+        return True
+
     def _copy_result(self) -> None:
         """Copy translated text to clipboard with quick feedback."""
-        text = self._txt_target.toPlainText()
+        text = self._txt_target.toPlainText().strip()
         if text:
-            self._clipboard.copy_to_clipboard(text)
-            self._btn_copy.setText("✓ Copied!")
-            QTimer.singleShot(1500, lambda: self._btn_copy.setText("📋 Copy"))
+            self.copy_to_clipboard_requested.emit(text)
+            self._btn_copy.setText(f"✓ {tr('copied')}")
+            QTimer.singleShot(1500, lambda: self._btn_copy.setText(f"📋 {tr('copy')}"))
+            self._status_bar.showMessage(tr("copied"), 2000)
 
     def _toggle_history(self) -> None:
         """Toggle accordion visibility for the translation history list."""

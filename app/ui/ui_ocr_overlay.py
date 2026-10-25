@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from PyQt6.QtCore import Qt, QPoint, QRect, QTimer
+from PyQt6.QtCore import Qt, QPoint, QRect, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QCursor, QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QWidget,
@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 
 class TranslatedBubbleCard(QFrame):
     """Floating card placed directly over a detected text block on screen."""
+
+    copy_requested = pyqtSignal(str)
 
     def __init__(
         self,
@@ -98,7 +100,9 @@ class TranslatedBubbleCard(QFrame):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
         if event.button() == Qt.MouseButton.LeftButton:
-            self._clipboard.copy_to_clipboard(self._translated)
+            self.copy_requested.emit(self._translated)
+            if self.receivers(self.copy_requested) == 0:
+                self._clipboard.copy_to_clipboard(self._translated)
             self._lbl_copied.setText("✓ Copied!")
             self._lbl_copied.show()
             QTimer.singleShot(1500, self._lbl_copied.hide)
@@ -109,6 +113,8 @@ class TranslatedBubbleCard(QFrame):
 
 class OCROverlayWindow(QWidget):
     """Transparent, frameless fullscreen/region overlay rendering in-place translation bubbles."""
+
+    copy_to_clipboard_requested = pyqtSignal(str)
 
     def __init__(
         self,
@@ -133,12 +139,23 @@ class OCROverlayWindow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
 
         # Position overlay over captured region or near cursor
-        if self._screen_rect is not None and len(self._screen_rect) == 4:
-            x, y, w, h = self._screen_rect
-            # Add padding around the region
-            pad = 20
-            self.setGeometry(max(0, x - pad), max(0, y - pad), w + pad * 2, h + pad * 2)
-            self._offset = (pad, pad)
+        if self._screen_rect is not None:
+            if isinstance(self._screen_rect, QRect):
+                x, y, w, h = self._screen_rect.x(), self._screen_rect.y(), self._screen_rect.width(), self._screen_rect.height()
+            elif hasattr(self._screen_rect, "__len__") and len(self._screen_rect) == 4:
+                x, y, w, h = self._screen_rect
+            else:
+                x, y, w, h = None, None, None, None
+
+            if x is not None:
+                # Add padding around the region
+                pad = 20
+                self.setGeometry(max(0, x - pad), max(0, y - pad), w + pad * 2, h + pad * 2)
+                self._offset = (pad, pad)
+            else:
+                c_pos = QCursor.pos()
+                self.setGeometry(max(0, c_pos.x() - 300), max(0, c_pos.y() - 200), 650, 450)
+                self._offset = (20, 50)
         else:
             # Fallback to cursor position
             c_pos = QCursor.pos()
@@ -219,6 +236,7 @@ class OCROverlayWindow(QWidget):
                 box=(bx, by, bw, bh),
                 parent=self,
             )
+            card.copy_requested.connect(self.copy_to_clipboard_requested.emit)
             card.setGeometry(card_x, card_y, card_w, card_h)
             card.show()
             self._cards.append(card)

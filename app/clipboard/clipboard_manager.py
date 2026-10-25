@@ -26,7 +26,7 @@ class ClipboardManager:
         cb.copy_to_clipboard("Hello, world!")
     """
 
-    _SUBPROCESS_TIMEOUT: int = 3  # seconds
+    _SUBPROCESS_TIMEOUT: float = 1.0  # seconds
 
     def __init__(self) -> None:
         """Initialise the clipboard manager and detect the session type."""
@@ -127,65 +127,85 @@ class ClipboardManager:
     # Writing
     # ------------------------------------------------------------------
 
-    def copy_to_clipboard(self, text: str) -> bool:
+    def is_text_in_clipboard(self, text: str) -> bool:
+        """Check if the given text matches current clipboard content."""
+        try:
+            from PyQt6.QtWidgets import QApplication
+
+            app = QApplication.instance()
+            if app is not None:
+                cb = app.clipboard()
+                if cb is not None and cb.text() == text:
+                    return True
+        except Exception:
+            pass
+        return False
+
+    def copy_to_clipboard(self, text: str, force_native: bool = False) -> bool:
         """Copy *text* to the system clipboard.
 
-        On Wayland the text is piped to ``wl-copy``; on X11 it is piped
-        to ``xclip -selection clipboard``.
+        Attempts standard Qt QClipboard operation on the main GUI thread first.
+        If QClipboard fails, times out, or compositors reject it (e.g. lack of focus),
+        falls back to native Wayland (wl-copy) or X11 (xclip) clipboard utilities.
 
         Args:
             text: The string to place on the clipboard.
+            force_native: If True, bypass QClipboard and use native tool directly.
 
         Returns:
             ``True`` if the operation succeeded, ``False`` otherwise.
         """
-        if self._session_type == "wayland":
-            cmd = ["wl-copy"]
-        else:
-            cmd = ["xclip", "-selection", "clipboard"]
+        if not text:
+            return False
 
         success = False
-        try:
-            result: subprocess.CompletedProcess[str] = subprocess.run(
-                cmd,
-                input=text,
-                capture_output=True,
-                text=True,
-                timeout=self._SUBPROCESS_TIMEOUT,
-            )
-            if result.returncode != 0:
-                logger.warning(
-                    "Clipboard write failed (rc=%d): %s",
-                    result.returncode,
-                    result.stderr.strip(),
-                )
+
+        # 1. Thread-safe QClipboard execution on the main GUI thread
+        if not force_native:
+            try:
+                from PyQt6.QtWidgets import QApplication
+                from PyQt6.QtCore import QThread
+
+                app = QApplication.instance()
+                if app is not None and QThread.currentThread() == app.thread():
+                    cb = app.clipboard()
+                    if cb is not None:
+                        cb.setText(text)
+                        if cb.text() == text:
+                            success = True
+            except Exception as exc:
+                logger.debug("QClipboard write failed or called outside main thread: %s", exc)
+
+        # 2. Native Wayland / X11 fallback if QClipboard was not successful
+        if not success:
+            if self._session_type == "wayland":
+                cmd = ["wl-copy"]
             else:
-                success = True
+                cmd = ["xclip", "-selection", "clipboard"]
 
-        except FileNotFoundError:
-            logger.warning(
-                "Clipboard tool not found: %s. "
-                "Please install the appropriate package "
-                "(wl-clipboard or xclip).",
-                cmd[0],
-            )
-        except subprocess.TimeoutExpired:
-            logger.warning(
-                "Clipboard write timed out after %d s.",
-                self._SUBPROCESS_TIMEOUT,
-            )
-        except OSError as exc:
-            logger.warning("Clipboard write OS error: %s", exc)
-
-        # Always synchronize with Qt clipboard
-        try:
-            from PyQt6.QtGui import QGuiApplication
-            cb = QGuiApplication.clipboard()
-            if cb is not None:
-                cb.setText(text)
+            try:
+                subprocess.run(
+                    cmd,
+                    input=text.encode("utf-8"),
+                    capture_output=True,
+                    timeout=self._SUBPROCESS_TIMEOUT,
+                    check=True,
+                )
                 success = True
-        except Exception:
-            pass
+            except FileNotFoundError:
+                logger.warning(
+                    "Clipboard tool not found: %s. "
+                    "Please install the appropriate package (wl-clipboard or xclip).",
+                    cmd[0],
+                )
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    "Native clipboard write timed out after %s s (%s).",
+                    self._SUBPROCESS_TIMEOUT,
+                    cmd[0],
+                )
+            except (subprocess.CalledProcessError, OSError) as exc:
+                logger.warning("Clipboard write error with %s: %s", cmd[0], exc)
 
         return success
 

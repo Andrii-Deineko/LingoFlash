@@ -372,6 +372,8 @@ class LingoFlashApp:
             pass
 
         self._overlay_window = OCROverlayWindow(blocks=blocks, screen_rect=screen_geom)
+        if hasattr(self, "_main_window") and self._main_window is not None:
+            self._overlay_window.copy_to_clipboard_requested.connect(self._main_window.set_clipboard_text)
         self._overlay_window.show()
         self._overlay_window.raise_()
         self._overlay_window.activateWindow()
@@ -433,6 +435,7 @@ class LingoFlashApp:
             self._popup.retranslate_requested.connect(self._on_popup_retranslate_requested)
             self._popup.cancel_worker_requested.connect(self._cancel_active_worker)
             self._popup.closed.connect(self._cancel_active_worker)
+            self._popup.copy_to_clipboard_requested.connect(self._main_window.set_clipboard_text)
             self._popup.apply_locale(self._translation_manager.get_interface_language())
         else:
             self._popup.apply_font_size(self._translation_manager.get_text_font_size())

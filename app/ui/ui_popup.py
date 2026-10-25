@@ -35,6 +35,7 @@ class TranslationPopup(QWidget):
     retranslate_requested = pyqtSignal(str, str, str)  # (text, source_lang, target_lang)
     cancel_worker_requested = pyqtSignal()
     closed = pyqtSignal()
+    copy_to_clipboard_requested = pyqtSignal(str)
 
     def __init__(self, parent: Optional[QWidget] = None, font_size: int = 14) -> None:
         super().__init__(parent)
@@ -417,7 +418,7 @@ class TranslationPopup(QWidget):
     def _copy_translation(self) -> None:
         """Copy current translated text to clipboard."""
         if self._translated_text:
-            self._clipboard.copy_to_clipboard(self._translated_text)
+            self.copy_to_clipboard_requested.emit(self._translated_text)
             prev_text = self._btn_copy.text()
             self._btn_copy.setText(tr("copied"))
             QTimer.singleShot(1500, lambda: self._btn_copy.setText(prev_text))
