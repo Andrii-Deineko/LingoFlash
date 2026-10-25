@@ -87,7 +87,7 @@ class TestDeepLErrorHandling(unittest.TestCase):
 
     def test_translation_worker_emits_friendly_error(self) -> None:
         """TranslationWorker must emit clean error signal on AuthorizationException."""
-        manager = TranslationManager()
+        manager = TranslationManager(config_path="/tmp/lingoflash_test_deepl_cfg.json")
         manager.set_backend("deepl", api_key="invalid-key:fx")
 
         worker = TranslationWorker(
@@ -115,8 +115,8 @@ class TestUIErrorVisibility(unittest.TestCase):
     """Test suite verifying UI updates, error display, and re-enabling."""
 
     def setUp(self) -> None:
-        self.manager = TranslationManager()
-        self.history = TranslationHistory()
+        self.manager = TranslationManager(config_path="/tmp/lingoflash_test_deepl_cfg.json")
+        self.history = TranslationHistory(history_path="/tmp/lingoflash_test_deepl_hist.json")
         self.win = MainWindow(translation_manager=self.manager, history=self.history)
         self.popup = TranslationPopup()
 

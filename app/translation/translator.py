@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 from abc import ABC, abstractmethod
@@ -926,7 +927,14 @@ class TranslationManager:
     (API keys, server URLs, etc.).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, config_path: Optional[Path | str] = None) -> None:
+        if config_path:
+            self._config_file = Path(config_path)
+        elif os.environ.get("LINGOFLASH_CONFIG_PATH"):
+            self._config_file = Path(os.environ["LINGOFLASH_CONFIG_PATH"])
+        else:
+            self._config_file = _CONFIG_FILE
+
         self._config: dict[str, Any] = {}
         self._backend: TranslationBackend | None = None
         self.load_config()
@@ -1084,15 +1092,15 @@ class TranslationManager:
 
     def save_config(self) -> None:
         """Write the current configuration to disk atomically."""
-        _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        tmp_file = _CONFIG_FILE.with_suffix(".tmp")
+        self._config_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp_file = self._config_file.with_suffix(".tmp")
         try:
             tmp_file.write_text(
                 json.dumps(self._config, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
-            tmp_file.replace(_CONFIG_FILE)
-            logger.debug("Config saved to %s", _CONFIG_FILE)
+            tmp_file.replace(self._config_file)
+            logger.debug("Config saved to %s", self._config_file)
         except OSError:
             logger.exception("Failed to save config")
             if tmp_file.is_file():
@@ -1103,12 +1111,12 @@ class TranslationManager:
 
     def load_config(self) -> None:
         """Read configuration from disk (no-op if the file doesn't exist)."""
-        if _CONFIG_FILE.is_file():
+        if self._config_file.is_file():
             try:
                 self._config = json.loads(
-                    _CONFIG_FILE.read_text(encoding="utf-8")
+                    self._config_file.read_text(encoding="utf-8")
                 )
-                logger.debug("Config loaded from %s", _CONFIG_FILE)
+                logger.debug("Config loaded from %s", self._config_file)
             except (json.JSONDecodeError, OSError):
                 logger.exception("Failed to load config; using defaults")
                 self._config = {}
@@ -1123,6 +1131,30 @@ class TranslationManager:
         kwargs: dict[str, Any] = (
             self._config.get("backends", {}).get(backend_name, {})
         )
+
+        # Detect invalid or dummy placeholder API keys on startup and fall back safely
+        if backend_name == "deepl":
+            key = str(kwargs.get("api_key", "")).strip()
+            if not key or key == "invalid-key:fx":
+                logger.warning(
+                    "DeepL API key is empty or dummy placeholder (%r); falling back to google backend",
+                    key,
+                )
+                backend_name = "google"
+                kwargs = self._config.get("backends", {}).get("google", {})
+                self._config["backend"] = "google"
+                self.save_config()
+        elif backend_name == "nvidia_nim":
+            key = str(kwargs.get("api_key", "")).strip()
+            if not key or "invalid" in key.lower():
+                logger.warning(
+                    "NVIDIA NIM API key is empty or invalid; falling back to google backend"
+                )
+                backend_name = "google"
+                kwargs = self._config.get("backends", {}).get("google", {})
+                self._config["backend"] = "google"
+                self.save_config()
+
         try:
             self._backend = _make_backend(backend_name, **kwargs)
         except ValueError:
@@ -1291,7 +1323,18 @@ class TranslationHistory:
     ``~/.local/share/lingoflash/history.json``.
     """
 
-    def __init__(self, max_entries: int = _MAX_HISTORY) -> None:
+    def __init__(
+        self,
+        max_entries: int = _MAX_HISTORY,
+        history_path: Optional[Path | str] = None,
+    ) -> None:
+        if history_path:
+            self._history_file = Path(history_path)
+        elif os.environ.get("LINGOFLASH_HISTORY_PATH"):
+            self._history_file = Path(os.environ["LINGOFLASH_HISTORY_PATH"])
+        else:
+            self._history_file = _HISTORY_FILE
+
         self._max_entries = max_entries
         self._entries: list[dict[str, str]] = []
         self._load()
@@ -1345,10 +1388,10 @@ class TranslationHistory:
 
     def _load(self) -> None:
         """Load history from disk."""
-        if _HISTORY_FILE.is_file():
+        if self._history_file.is_file():
             try:
                 data = json.loads(
-                    _HISTORY_FILE.read_text(encoding="utf-8")
+                    self._history_file.read_text(encoding="utf-8")
                 )
                 if isinstance(data, list):
                     self._entries = data[-self._max_entries :]
@@ -1357,7 +1400,7 @@ class TranslationHistory:
                 logger.debug(
                     "Loaded %d history entries from %s",
                     len(self._entries),
-                    _HISTORY_FILE,
+                    self._history_file,
                 )
             except (json.JSONDecodeError, OSError):
                 logger.exception("Failed to load history; starting fresh")
@@ -1367,14 +1410,14 @@ class TranslationHistory:
 
     def _save(self) -> None:
         """Persist history to disk atomically."""
-        _DATA_DIR.mkdir(parents=True, exist_ok=True)
-        tmp_file = _HISTORY_FILE.with_suffix(".tmp")
+        self._history_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp_file = self._history_file.with_suffix(".tmp")
         try:
             tmp_file.write_text(
                 json.dumps(self._entries, indent=2, ensure_ascii=False),
                 encoding="utf-8",
             )
-            tmp_file.replace(_HISTORY_FILE)
+            tmp_file.replace(self._history_file)
         except OSError:
             logger.exception("Failed to save history")
             if tmp_file.is_file():
