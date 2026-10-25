@@ -1,8 +1,7 @@
 """Clipboard manager for reading and writing system clipboard on Linux.
 
-Supports both Wayland (via ``wl-paste`` / ``wl-copy``) and X11
-(via ``xclip``) session types, auto-detecting the active session
-from environment variables.
+Supports Wayland (via ``wl-paste`` / ``wl-copy``) and Qt QClipboard,
+auto-detecting the active session from environment variables.
 """
 
 import logging
@@ -65,37 +64,36 @@ class ClipboardManager:
     def read_primary(self) -> str:
         """Read text from the *primary* selection buffer.
 
-        On Wayland this calls ``wl-paste --primary --no-newline``;
-        on X11 it calls ``xclip -o -selection primary``.
+        On Wayland this calls ``wl-paste --primary --no-newline``.
+        If wl-paste is not available or empty, falls back to Qt selection clipboard.
 
         Returns:
             The selected text (stripped), or an empty string on failure.
         """
-        if self._session_type == "wayland":
-            return self._run_read_command(
-                ["wl-paste", "--primary", "--no-newline"],
-            )
-        return self._run_read_command(
-            ["xclip", "-o", "-selection", "primary"],
-        )
+        text = self._run_read_command(["wl-paste", "--primary", "--no-newline"])
+        if not text:
+            try:
+                from PyQt6.QtWidgets import QApplication
+                from PyQt6.QtGui import QClipboard
+                app = QApplication.instance()
+                if app is not None:
+                    cb = app.clipboard()
+                    if cb is not None:
+                        text = cb.text(QClipboard.Mode.Selection) or ""
+            except Exception:
+                pass
+        return text.strip()
 
     def read_clipboard(self) -> str:
         """Read text from the system *clipboard* buffer.
 
-        On Wayland this calls ``wl-paste --no-newline``;
-        on X11 it calls ``xclip -o -selection clipboard``.
+        On Wayland this calls ``wl-paste --no-newline``.
+        If wl-paste is not available or empty, falls back to Qt clipboard.
 
         Returns:
             The clipboard text (stripped), or an empty string on failure.
         """
-        text = ""
-        if self._session_type == "wayland":
-            text = self._run_read_command(["wl-paste", "--no-newline"])
-        else:
-            text = self._run_read_command(
-                ["xclip", "-o", "-selection", "clipboard"],
-            )
-
+        text = self._run_read_command(["wl-paste", "--no-newline"])
         if not text:
             # Fall back to QGuiApplication clipboard if available
             try:
@@ -146,7 +144,7 @@ class ClipboardManager:
 
         Attempts standard Qt QClipboard operation on the main GUI thread first.
         If QClipboard fails, times out, or compositors reject it (e.g. lack of focus),
-        falls back to native Wayland (wl-copy) or X11 (xclip) clipboard utilities.
+        falls back to native Wayland (wl-copy) clipboard utility.
 
         Args:
             text: The string to place on the clipboard.
@@ -176,12 +174,9 @@ class ClipboardManager:
             except Exception as exc:
                 logger.debug("QClipboard write failed or called outside main thread: %s", exc)
 
-        # 2. Native Wayland / X11 fallback if QClipboard was not successful
+        # 2. Native Wayland fallback if QClipboard was not successful
         if not success:
-            if self._session_type == "wayland":
-                cmd = ["wl-copy"]
-            else:
-                cmd = ["xclip", "-selection", "clipboard"]
+            cmd = ["wl-copy"]
 
             try:
                 subprocess.run(
@@ -194,8 +189,7 @@ class ClipboardManager:
                 success = True
             except FileNotFoundError:
                 logger.warning(
-                    "Clipboard tool not found: %s. "
-                    "Please install the appropriate package (wl-clipboard or xclip).",
+                    "Clipboard tool not found: %s. Please install wl-clipboard.",
                     cmd[0],
                 )
             except subprocess.TimeoutExpired:
@@ -243,8 +237,7 @@ class ClipboardManager:
         except FileNotFoundError:
             logger.warning(
                 "Clipboard tool not found: %s. "
-                "Please install the appropriate package "
-                "(wl-clipboard or xclip).",
+                "Please install wl-clipboard.",
                 cmd[0],
             )
             return ""

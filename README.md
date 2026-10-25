@@ -38,7 +38,7 @@ In addition to text selection, LingoFlash features a native **Screen OCR Capture
 - 🎨 **Extensible Theming Engine:** 11 beautiful, handcrafted UI themes externalized in `assets/themes.json` (Dark, Light, Nord, Dracula, AMOLED Black, Catppuccin Mocha, Tokyo Night, Solarized Dark/Light, Gruvbox, and High Contrast).
 - 🎚️ **Independent Font Resizing:** Separate typography controls for UI elements (buttons, menus, labels) and text translation editor boxes.
 - 🎙️ **Voice Dictation Input:** Direct speech-to-text integration for spoken translation input.
-- 📋 **Automatic Clipboard Management:** Fallback clipboard synchronization supporting `wl-copy`/`wl-paste` on Wayland and `xclip`/`xsel` on X11.
+- 📋 **Automatic Clipboard Management:** Native clipboard synchronization supporting `wl-copy`/`wl-paste` on Wayland and Qt clipboard fallback.
 - 🛡️ **Single-Instance IPC Daemon:** Robust Unix domain socket IPC daemon ensuring only one background instance runs, safely forwarding CLI signals and global shortcuts.
 
 ---
@@ -87,8 +87,7 @@ sudo dnf install -y \
     tesseract-langpack-rus \
     tesseract-langpack-swe \
     gnome-screenshot \
-    wl-clipboard \
-    xclip
+    wl-clipboard
 ```
 
 Or run the bundled automated dependency script:

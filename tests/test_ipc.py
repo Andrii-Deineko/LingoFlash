@@ -79,6 +79,23 @@ class TestIPCServer(unittest.TestCase):
         self.assertEqual(len(received_commands), 0)
         server.cleanup()
 
+    def test_ipc_command_forwards_environment_variables(self) -> None:
+        """Verify IPC command forwards and updates graphical session environment variables."""
+        server = IPCServer(app_name=self.socket_name)
+        server.start_listening()
+
+        client_ipc = IPCServer(app_name=self.socket_name)
+        custom_env = {"WAYLAND_DISPLAY": "wayland-test-99", "XDG_CURRENT_DESKTOP": "GNOME"}
+        sent = client_ipc.send_command("ocr_capture", env=custom_env)
+        self.assertTrue(sent)
+
+        for _ in range(10):
+            self._app.processEvents()
+
+        self.assertEqual(os.environ.get("WAYLAND_DISPLAY"), "wayland-test-99")
+        server.cleanup()
+        client_ipc.cleanup()
+
     def test_handle_payload_without_action_key(self) -> None:
         """Verify server ignores JSON lacking 'action' key without error."""
         server = IPCServer(app_name=self.socket_name)

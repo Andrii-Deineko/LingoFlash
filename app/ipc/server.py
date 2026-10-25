@@ -7,6 +7,7 @@ a local Unix domain socket.
 
 import json
 import logging
+import os
 from typing import Optional
 
 from PyQt6.QtCore import QObject, pyqtSignal
@@ -84,15 +85,16 @@ class IPCServer(QObject):
         logger.debug("No running instance found for '%s'.", self._app_name)
         return False
 
-    def send_command(self, action: str) -> bool:
-        """Send a command to the running instance.
+    def send_command(self, action: str, env: Optional[dict[str, str]] = None) -> bool:
+        """Send a command to the running instance with active environment context.
 
-        Serialises ``{"action": "<action>"}`` as JSON and writes it to
+        Serialises ``{"action": "<action>", "env": {...}}`` as JSON and writes it to
         the socket of the already-running server.
 
         Args:
-            action: The command action string, e.g.
-                ``"translate_selection"``.
+            action: The command action string, e.g. ``"translate_selection"``.
+            env: Optional environment dictionary to forward. If None, captures
+                 active graphical session variables from ``os.environ``.
 
         Returns:
             ``True`` if the payload was sent and acknowledged,
@@ -109,7 +111,25 @@ class IPCServer(QObject):
             socket.deleteLater()
             return False
 
-        payload: bytes = json.dumps({"action": action}).encode("utf-8")
+        env_vars = env if env is not None else {
+            k: v for k, v in os.environ.items()
+            if k in (
+                "WAYLAND_DISPLAY",
+                "DISPLAY",
+                "XDG_CURRENT_DESKTOP",
+                "XDG_SESSION_TYPE",
+                "XDG_SESSION_DESKTOP",
+                "DBUS_SESSION_BUS_ADDRESS",
+                "XDG_RUNTIME_DIR",
+                "GDK_BACKEND",
+                "QT_QPA_PLATFORM",
+            )
+        }
+        payload_dict: dict = {"action": action}
+        if env_vars:
+            payload_dict["env"] = env_vars
+
+        payload: bytes = json.dumps(payload_dict).encode("utf-8")
         socket.write(payload)
 
         if not socket.waitForBytesWritten(1000):
@@ -195,6 +215,13 @@ class IPCServer(QObject):
                 return
 
             action: str = message.get("action", "")
+            client_env = message.get("env", {})
+            if isinstance(client_env, dict) and client_env:
+                logger.debug("Received client graphical environment variables: %s", list(client_env.keys()))
+                for k, v in client_env.items():
+                    if k and v:
+                        os.environ[k] = str(v)
+
             if action:
                 logger.info("Received IPC command: %s", action)
                 self.command_received.emit(action)

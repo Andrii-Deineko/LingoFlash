@@ -61,25 +61,12 @@ class TestScreenCapture(unittest.TestCase):
                 check=False,
             )
 
-    def test_capture_region_maim_fallback(self) -> None:
-        """Verify capture_region falls back to maim if gnome-screenshot is absent."""
-        maim_proc = MagicMock(spec=subprocess.CompletedProcess)
-        maim_proc.returncode = 0
-
-        def mock_which(cmd: str):
-            if cmd == "maim":
-                return "/usr/bin/maim"
-            return None
-
-        with patch("shutil.which", side_effect=mock_which), \
-             patch("subprocess.run", return_value=maim_proc) as mock_run, \
-             patch("os.path.isfile", return_value=True), \
-             patch("os.path.getsize", return_value=5678):
-
-            target = "/tmp/test_lingo_ocr.png"
-            res = ScreenCapture.capture_region(target)
-            self.assertEqual(res, target)
-            mock_run.assert_called_once_with(["maim", "-s", target], capture_output=True, text=True, env=unittest.mock.ANY, check=False)
+    def test_get_session_env_constructs_wayland_vars(self) -> None:
+        """Verify get_session_env discovers and constructs Wayland session variables."""
+        env = ScreenCapture.get_session_env()
+        self.assertIn("DISPLAY", env)
+        self.assertIn("XDG_RUNTIME_DIR", env)
+        self.assertIn("XDG_CURRENT_DESKTOP", env)
 
     def test_capture_region_cancelled_returns_none(self) -> None:
         """User cancelling screenshot selection should return None cleanly."""

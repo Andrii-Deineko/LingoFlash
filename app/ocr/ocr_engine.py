@@ -1,6 +1,6 @@
 """OCR engine for screen region capture and text extraction.
 
-Provides Wayland/X11 screen capture via external tools (gnome-screenshot, maim)
+Provides Wayland screen capture via external tools (gnome-screenshot)
 and text extraction via Tesseract OCR and Pillow with image preprocessing.
 """
 
@@ -48,13 +48,59 @@ class ScreenCapture:
         return "x11"
 
     @classmethod
+    def get_session_env(cls) -> dict[str, str]:
+        """Construct a complete, active graphical session environment for subprocesses."""
+        env = os.environ.copy()
+        uid = os.getuid()
+        runtime_dir = env.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}"
+        if os.path.isdir(runtime_dir):
+            env["XDG_RUNTIME_DIR"] = runtime_dir
+
+        if not env.get("DBUS_SESSION_BUS_ADDRESS"):
+            bus_path = f"{runtime_dir}/bus"
+            if os.path.exists(bus_path):
+                env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus_path}"
+
+        if not env.get("WAYLAND_DISPLAY"):
+            if os.path.isdir(runtime_dir):
+                for fname in ("wayland-0", "wayland-1"):
+                    if os.path.exists(os.path.join(runtime_dir, fname)):
+                        env["WAYLAND_DISPLAY"] = fname
+                        break
+
+        if not env.get("DISPLAY"):
+            env["DISPLAY"] = ":0"
+
+        if not env.get("XDG_SESSION_TYPE"):
+            env["XDG_SESSION_TYPE"] = "wayland" if env.get("WAYLAND_DISPLAY") else "x11"
+
+        if not env.get("XDG_CURRENT_DESKTOP"):
+            env["XDG_CURRENT_DESKTOP"] = "GNOME"
+
+        if env.get("WAYLAND_DISPLAY"):
+            env.setdefault("GDK_BACKEND", "wayland,x11,*")
+
+        for k in (
+            "WAYLAND_DISPLAY",
+            "DISPLAY",
+            "XDG_RUNTIME_DIR",
+            "DBUS_SESSION_BUS_ADDRESS",
+            "XDG_SESSION_TYPE",
+            "XDG_CURRENT_DESKTOP",
+        ):
+            if k in env and not os.environ.get(k):
+                os.environ[k] = env[k]
+
+        return env
+
+    @classmethod
     def _capture_wayland(cls, output_path: str = DEFAULT_OCR_IMAGE) -> Optional[str]:
         """Capture a screen region on Wayland using gnome-screenshot."""
         return cls.capture_region(output_path)
 
     @classmethod
     def _capture_x11(cls, output_path: str = DEFAULT_OCR_IMAGE) -> Optional[str]:
-        """Capture a screen region on X11 using gnome-screenshot or maim."""
+        """Capture a screen region."""
         return cls.capture_region(output_path)
 
     @classmethod
@@ -146,7 +192,7 @@ class ScreenCapture:
                 pass
 
         logger.info("Initiating interactive screen capture (target=%s)", output_path)
-        env = os.environ.copy()
+        env = cls.get_session_env()
 
         # 1. Primary GNOME / Wayland tool: gnome-screenshot -a -f output_path
         # Blocks and waits synchronously for the user to drag and select screen area
@@ -207,27 +253,7 @@ class ScreenCapture:
             except Exception as exc:
                 logger.warning("DBus SelectArea exception: %s", exc)
 
-        # 3. Fallback for X11 sessions (maim)
-        if shutil.which("maim"):
-            try:
-                logger.debug("Running maim -s %s", output_path)
-                maim_res = subprocess.run(
-                    ["maim", "-s", output_path],
-                    capture_output=True,
-                    text=True,
-                    env=env,
-                    check=False,
-                )
-                if maim_res.returncode == 0 and os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
-                    logger.info("Captured area via maim: %s", output_path)
-                    return output_path
-                maim_err = getattr(maim_res, "stderr", "") or ""
-                if maim_err:
-                    logger.warning("maim error: %s", maim_err.strip())
-            except Exception as exc:
-                logger.warning("maim execution exception: %s", exc)
-
-        # 4. Fallback for wlroots Wayland compositors (grim + slurp)
+        # 3. Fallback for wlroots Wayland compositors (grim + slurp)
         if shutil.which("grim") and shutil.which("slurp"):
             try:
                 slurp_res = subprocess.run(

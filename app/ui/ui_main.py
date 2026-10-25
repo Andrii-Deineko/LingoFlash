@@ -1350,7 +1350,7 @@ class MainWindow(QMainWindow):
         except Exception as exc:
             logger.debug("Failed setting QClipboard on main thread: %s", exc)
 
-        # If QClipboard failed or compositor denied focus, fallback to native wl-copy/xclip
+        # If QClipboard failed or compositor denied focus, fallback to native wl-copy
         if not success:
             return self._clipboard.copy_to_clipboard(text, force_native=True)
 

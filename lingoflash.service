@@ -1,5 +1,6 @@
 [Unit]
 Description=LingoFlash Translation Client
+PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
@@ -8,6 +9,9 @@ ExecStart=/usr/bin/python3 /home/andrii/.gemini/antigravity/scratch/translator/m
 Restart=on-failure
 RestartSec=5
 Environment=DISPLAY=:0
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=XDG_CURRENT_DESKTOP=GNOME
+Environment=XDG_SESSION_TYPE=wayland
 
 [Install]
 WantedBy=default.target

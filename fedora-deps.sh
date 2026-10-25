@@ -13,10 +13,9 @@ sudo dnf install -y \
     tesseract-langpack-ukr \
     tesseract-langpack-rus \
     wl-clipboard \
-    xclip \
+    gnome-screenshot \
     slurp \
     grim \
-    maim \
     gnome-shell-extension-appindicator
 
 echo ""
