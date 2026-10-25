@@ -58,12 +58,78 @@ class ScreenCapture:
         return cls.capture_region(output_path)
 
     @classmethod
+    def _parse_dbus_response(
+        cls, stdout: str, output_path: str, env: dict[str, str]
+    ) -> Optional[str]:
+        """Parse gdbus SelectArea/ScreenshotArea response and ensure image at output_path."""
+        if not stdout:
+            return None
+
+        # 1. Check if the response returned a file path or URI directly
+        # E.g. (true, '/path/to/img.png') or ('file:///path/to/img.png') or ('/tmp/...')
+        path_match = re.search(r"'(?:file://)?(/[^']+)'", stdout) or re.search(r'"(?:file://)?(/[^"]+)"', stdout)
+        if path_match:
+            raw_path = path_match.group(1)
+            if os.path.isfile(raw_path) and os.path.getsize(raw_path) > 0:
+                if os.path.abspath(raw_path) != os.path.abspath(output_path):
+                    shutil.copy2(raw_path, output_path)
+                if os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+                    logger.info("Extracted screenshot from DBus response path: %s", output_path)
+                    return output_path
+
+        # 2. Check if the response returned area coordinates: (x, y, width, height)
+        # GNOME Shell SelectArea signature: (out i x, out i y, out i width, out i height)
+        # E.g. (int32 100, int32 200, int32 300, int32 400) or (100, 200, 300, 400)
+        clean_text = re.sub(r"(?:int|uint)\d+\s+", "", stdout)
+        nums = [int(n) for n in re.findall(r"-?\d+", clean_text)]
+        if len(nums) >= 4:
+            x, y, w, h = nums[0], nums[1], nums[2], nums[3]
+            if w > 0 and h > 0:
+                cls.last_geometry = (x, y, w, h)
+                logger.info("GNOME Shell DBus SelectArea coordinates: x=%d, y=%d, w=%d, h=%d", x, y, w, h)
+                # Capture the selected region via ScreenshotArea
+                area_cmd = [
+                    "gdbus", "call", "--session",
+                    "--dest", "org.gnome.Shell.Screenshot",
+                    "--object-path", "/org/gnome/Shell/Screenshot",
+                    "--method", "org.gnome.Shell.Screenshot.ScreenshotArea",
+                    str(x), str(y), str(w), str(h), "false", output_path,
+                ]
+                area_res = subprocess.run(
+                    area_cmd,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    check=False,
+                )
+                if area_res.stderr:
+                    logger.debug("DBus ScreenshotArea stderr: %s", area_res.stderr.strip())
+
+                if area_res.stdout:
+                    sub_match = re.search(r"'(?:file://)?(/[^']+)'", area_res.stdout) or re.search(r'"(?:file://)?(/[^"]+)"', area_res.stdout)
+                    if sub_match:
+                        raw_sub = sub_match.group(1)
+                        if os.path.isfile(raw_sub) and os.path.abspath(raw_sub) != os.path.abspath(output_path):
+                            shutil.copy2(raw_sub, output_path)
+
+                if os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+                    logger.info("Captured area via DBus ScreenshotArea: %s", output_path)
+                    return output_path
+            else:
+                logger.info("User cancelled DBus area selection (empty dimensions: %dx%d)", w, h)
+                return None
+
+        return None
+
+    @classmethod
     def capture_region(cls, output_path: str = DEFAULT_OCR_IMAGE) -> Optional[str]:
         """Capture a user-selected screen region to a PNG file.
 
         On GNOME Wayland (Fedora), executes ``gnome-screenshot -a -f <path>``
-        using ``subprocess.run()``, blocking and waiting for the user to
-        physically drag and select the area on screen.
+        using ``subprocess.run()`` with ``env=os.environ.copy()``. If that fails
+        or produces no image, falls back to the native GNOME Shell DBus API
+        (``SelectArea``). Completely blocks and waits for the user to finish
+        drawing the box.
 
         Args:
             output_path: Target PNG file path (defaults to ``/tmp/lingo_ocr.png``).
@@ -79,32 +145,69 @@ class ScreenCapture:
             except OSError:
                 pass
 
-        logger.info("Initiating screen capture (target=%s)", output_path)
+        logger.info("Initiating interactive screen capture (target=%s)", output_path)
+        env = os.environ.copy()
 
-        # Primary Wayland / GNOME tool: gnome-screenshot -a -f /tmp/lingo_ocr.png
-        # Blocks and waits synchronously for the user to physically drag and select screen area
+        # 1. Primary GNOME / Wayland tool: gnome-screenshot -a -f output_path
+        # Blocks and waits synchronously for the user to drag and select screen area
         if shutil.which("gnome-screenshot"):
             try:
-                logger.debug("Running gnome-screenshot -a -f %s", output_path)
+                logger.debug("Running gnome-screenshot -a -f %s with environment copy", output_path)
                 res = subprocess.run(
                     ["gnome-screenshot", "-a", "-f", output_path],
                     capture_output=True,
                     text=True,
+                    env=env,
                     check=False,
                 )
                 if res.returncode == 0 and os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
                     logger.info("Captured area via gnome-screenshot: %s", output_path)
                     return output_path
 
-                # Non-zero returncode or empty file indicates user cancelled selection (Esc)
-                logger.info("gnome-screenshot was cancelled or returned empty (rc=%d)", res.returncode)
-                return None
-            except FileNotFoundError:
-                pass
-            except Exception as exc:
-                logger.warning("gnome-screenshot error: %s", exc)
+                stderr = getattr(res, "stderr", "") or ""
+                stdout = getattr(res, "stdout", "") or ""
+                if stderr:
+                    logger.warning("gnome-screenshot failed (rc=%d): stderr=%s", res.returncode, stderr.strip())
+                elif stdout:
+                    logger.info("gnome-screenshot output (rc=%d): stdout=%s", res.returncode, stdout.strip())
+                else:
+                    logger.info("gnome-screenshot returned rc=%d with no image output", res.returncode)
 
-        # X11 fallback (if gnome-screenshot is not available on X11)
+            except FileNotFoundError:
+                logger.debug("gnome-screenshot binary not found")
+            except Exception as exc:
+                logger.warning("gnome-screenshot execution exception: %s", exc)
+
+        # 2. Native GNOME Shell DBus API alternative: SelectArea
+        if shutil.which("gdbus"):
+            try:
+                logger.debug("Attempting interactive area selection via GNOME Shell DBus API")
+                dbus_cmd = [
+                    "gdbus", "call", "--session",
+                    "--dest", "org.gnome.Shell.Screenshot",
+                    "--object-path", "/org/gnome/Shell/Screenshot",
+                    "--method", "org.gnome.Shell.Screenshot.SelectArea",
+                ]
+                dbus_res = subprocess.run(
+                    dbus_cmd,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    check=False,
+                )
+                dbus_stdout = getattr(dbus_res, "stdout", "") or ""
+                dbus_stderr = getattr(dbus_res, "stderr", "") or ""
+                if dbus_res.returncode == 0 and dbus_stdout.strip():
+                    dbus_file = cls._parse_dbus_response(dbus_stdout.strip(), output_path, env)
+                    if dbus_file and os.path.isfile(dbus_file) and os.path.getsize(dbus_file) > 0:
+                        return dbus_file
+                else:
+                    if dbus_stderr:
+                        logger.warning("DBus SelectArea error (rc=%d): %s", dbus_res.returncode, dbus_stderr.strip())
+            except Exception as exc:
+                logger.warning("DBus SelectArea exception: %s", exc)
+
+        # 3. Fallback for X11 sessions (maim)
         if shutil.which("maim"):
             try:
                 logger.debug("Running maim -s %s", output_path)
@@ -112,21 +215,48 @@ class ScreenCapture:
                     ["maim", "-s", output_path],
                     capture_output=True,
                     text=True,
+                    env=env,
                     check=False,
                 )
                 if maim_res.returncode == 0 and os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
                     logger.info("Captured area via maim: %s", output_path)
                     return output_path
-                return None
-            except FileNotFoundError:
-                pass
+                maim_err = getattr(maim_res, "stderr", "") or ""
+                if maim_err:
+                    logger.warning("maim error: %s", maim_err.strip())
             except Exception as exc:
-                logger.warning("maim error: %s", exc)
+                logger.warning("maim execution exception: %s", exc)
 
-        logger.error(
-            "gnome-screenshot is required for screen capture on GNOME Wayland. Install with: sudo dnf install gnome-screenshot"
-        )
-        return None
+        # 4. Fallback for wlroots Wayland compositors (grim + slurp)
+        if shutil.which("grim") and shutil.which("slurp"):
+            try:
+                slurp_res = subprocess.run(
+                    ["slurp"],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    check=False,
+                )
+                if slurp_res.returncode == 0 and slurp_res.stdout.strip():
+                    region = slurp_res.stdout.strip()
+                    grim_res = subprocess.run(
+                        ["grim", "-g", region, output_path],
+                        capture_output=True,
+                        text=True,
+                        env=env,
+                        check=False,
+                    )
+                    if grim_res.returncode == 0 and os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+                        logger.info("Captured area via grim+slurp: %s", output_path)
+                        return output_path
+            except Exception as exc:
+                logger.debug("grim/slurp fallback exception: %s", exc)
+
+        if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
+            logger.info("Screen capture was cancelled or failed to produce an image")
+            return None
+
+        return output_path
 
 
 class OCREngine:

@@ -49,6 +49,7 @@ class TestScreenOCRWayland(unittest.TestCase):
                 ["gnome-screenshot", "-a", "-f", "/tmp/lingo_ocr.png"],
                 capture_output=True,
                 text=True,
+                env=unittest.mock.ANY,
                 check=False,
             )
 
