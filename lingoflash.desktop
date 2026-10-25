@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=LingoFlash
+Comment=Quick desktop translation client
+Exec=python3 /home/andrii/.gemini/antigravity/scratch/translator/main.py
+Icon=accessories-text-editor
+Terminal=false
+Categories=Utility;TextTools;
+StartupNotify=false
+X-GNOME-Autostart-enabled=true

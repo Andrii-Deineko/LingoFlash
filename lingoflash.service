@@ -1,0 +1,13 @@
+[Unit]
+Description=LingoFlash Translation Client
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/andrii/.gemini/antigravity/scratch/translator/main.py
+Restart=on-failure
+RestartSec=5
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=default.target
