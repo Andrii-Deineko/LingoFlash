@@ -503,6 +503,74 @@ _DEEPL_LANGUAGES: dict[str, str] = {
 }
 
 
+def _patch_deep_translator() -> None:
+    """Monkey-patch DeeplTranslator to use official modern DeepL Auth headers.
+
+    DeepL deprecated and disabled query-parameter authentication ('auth_key' in GET params),
+    mandating HTTP POST with 'Authorization: DeepL-Auth-Key <key>' headers.
+    """
+    try:
+        from deep_translator import deepl
+        from deep_translator.exceptions import (
+            AuthorizationException,
+            ServerException,
+            TooManyRequests,
+            TranslationNotFound,
+        )
+
+        def _modern_deepl_translate(self: Any, text: str, **kwargs: Any) -> str:
+            if not text or not str(text).strip():
+                return text
+
+            if hasattr(self, "_same_source_target") and self._same_source_target():
+                return text
+
+            headers = {
+                "Authorization": f"DeepL-Auth-Key {self.api_key}",
+            }
+            target = str(self._target).upper()
+            data: dict[str, Any] = {
+                "text": [text],
+                "target_lang": target,
+            }
+            if hasattr(self, "_source") and self._source and str(self._source).lower() != "auto":
+                data["source_lang"] = str(self._source).upper()
+
+            endpoint = self._base_url.rstrip("/") + "/translate"
+            try:
+                response = requests.post(endpoint, headers=headers, data=data, timeout=12)
+            except requests.exceptions.RequestException as exc:
+                raise ServerException(503) from exc
+
+            if response.status_code == 403:
+                raise AuthorizationException(self.api_key)
+            if response.status_code in (429, 456):
+                raise TooManyRequests()
+            if response.status_code != 200:
+                raise ServerException(response.status_code)
+
+            try:
+                res = response.json()
+            except Exception as exc:
+                raise ServerException(500) from exc
+
+            if not res or "translations" not in res or not res["translations"]:
+                raise TranslationNotFound(text)
+
+            first_trans = res["translations"][0]
+            if "detected_source_language" in first_trans:
+                self._detected_source_lang = first_trans["detected_source_language"]
+
+            return first_trans.get("text", "")
+
+        deepl.DeeplTranslator.translate = _modern_deepl_translate
+    except ImportError:
+        pass
+
+
+_patch_deep_translator()
+
+
 class DeepLBackend(TranslationBackend):
     """Backend powered by the DeepL API via *deep_translator*.
 
@@ -572,7 +640,13 @@ class DeepLBackend(TranslationBackend):
                 use_free_api=is_free,
             )
             result: str = translator.translate(stripped)
-            detected = self.detect_language(stripped) if source_lang == "auto" else source_lang
+            detected = getattr(translator, "_detected_source_lang", None)
+            if detected:
+                detected = str(detected).lower()
+            elif source_lang == "auto":
+                detected = self.detect_language(stripped)
+            else:
+                detected = source_lang
             logger.debug(
                 "DeepL translated [%s→%s]: %s … → %s …",
                 source_lang,
@@ -679,7 +753,13 @@ class LibreTranslateBackend(TranslationBackend):
                 base_url=self._base_url,
             )
             result: str = translator.translate(stripped)
-            detected = self.detect_language(stripped) if source_lang == "auto" else source_lang
+            detected = getattr(translator, "_detected_source_lang", None)
+            if detected:
+                detected = str(detected).lower()
+            elif source_lang == "auto":
+                detected = self.detect_language(stripped)
+            else:
+                detected = source_lang
             logger.debug(
                 "LibreTranslate [%s→%s]: %s … → %s …",
                 source_lang,
