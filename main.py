@@ -519,12 +519,8 @@ class LingoFlashApp:
             try:
                 if not self._popup.isVisible():
                     return
-                self._popup.set_translation(
-                    source_text="",
-                    translated_text=f"Error: {message}",
-                    source_lang="",
-                    target_lang="",
-                )
+                err_msg = message if message.startswith("⚠️") else f"⚠️ Translation Error: {message}"
+                self._popup.set_error(err_msg)
             except RuntimeError:
                 logger.debug("Popup C++ object has been deleted; ignoring")
 
@@ -584,12 +580,8 @@ class LingoFlashApp:
         if request_id != self._current_request_id:
             return
 
-        self._main_window.set_translation_result(
-            source_text="",
-            translated_text=f"Error: {message}",
-            source_lang="",
-            target_lang="",
-        )
+        err_msg = message if message.startswith("⚠️") else f"⚠️ Translation Error: {message}"
+        self._main_window.set_translation_error(err_msg)
 
     def _show_main_window(self) -> None:
         """Show, raise, and activate the main window."""

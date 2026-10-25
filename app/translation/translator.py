@@ -510,9 +510,15 @@ class DeepLBackend(TranslationBackend):
         use_free_api: If ``True``, use the free DeepL API endpoint.
     """
 
-    def __init__(self, api_key: str, use_free_api: bool = True) -> None:
-        self._api_key = api_key
-        self._use_free_api = use_free_api
+    def __init__(self, api_key: str = "", use_free_api: bool | None = None) -> None:
+        self._api_key = (api_key or "").strip()
+        # DeepL keys ending with :fx strictly belong to DeepL Free accounts
+        if self._api_key.endswith(":fx"):
+            self._use_free_api = True
+        elif use_free_api is not None:
+            self._use_free_api = bool(use_free_api)
+        else:
+            self._use_free_api = False
 
     @property
     def name(self) -> str:  # noqa: D401
@@ -538,15 +544,31 @@ class DeepLBackend(TranslationBackend):
         cached = _cache_get(stripped, source_lang, target_lang)
         if cached is not None:
             return cached
+
+        if not self._api_key:
+            raise TranslationError(
+                "⚠️ Translation Error: DeepL API Key is missing. Please configure your key in Settings."
+            )
+
         try:
             from deep_translator import DeeplTranslator  # type: ignore[import-untyped]
+            from deep_translator.exceptions import (  # type: ignore[import-untyped]
+                AuthorizationException,
+                ApiKeyException,
+                TooManyRequests,
+                ServerException,
+                RequestError,
+            )
+
+            # DeepL free vs pro routing: keys ending with :fx MUST use use_free_api=True
+            is_free = True if self._api_key.endswith(":fx") else self._use_free_api
 
             source = source_lang if source_lang != "auto" else "auto"
             translator = DeeplTranslator(
                 api_key=self._api_key,
                 source=source,
                 target=target_lang,
-                use_free_api=self._use_free_api,
+                use_free_api=is_free,
             )
             result: str = translator.translate(stripped)
             detected = self.detect_language(stripped) if source_lang == "auto" else source_lang
@@ -562,13 +584,43 @@ class DeepLBackend(TranslationBackend):
             return result, detected
         except ImportError as exc:
             raise TranslationError(
-                "deep_translator package is not installed", original=exc
+                "⚠️ Translation Error: deep_translator package is not installed", original=exc
             ) from exc
+        except AuthorizationException as exc:
+            msg = "⚠️ Translation Error: Invalid or unauthorized DeepL API Key. Please check your settings."
+            logger.warning("DeepL authorization error: %s", exc)
+            raise TranslationError(msg, original=exc) from exc
+        except ApiKeyException as exc:
+            msg = "⚠️ Translation Error: DeepL API Key is missing or invalid. Please check your settings."
+            logger.warning("DeepL API key error: %s", exc)
+            raise TranslationError(msg, original=exc) from exc
+        except TooManyRequests as exc:
+            msg = "⚠️ Translation Error: DeepL quota or rate limit exceeded. Please check your account."
+            logger.warning("DeepL rate limit error: %s", exc)
+            raise TranslationError(msg, original=exc) from exc
+        except ServerException as exc:
+            msg = f"⚠️ Translation Error: DeepL server error ({exc}). Please try again later."
+            logger.warning("DeepL server error: %s", exc)
+            raise TranslationError(msg, original=exc) from exc
+        except RequestError as exc:
+            msg = f"⚠️ Translation Error: DeepL network error ({exc}). Please check your connection."
+            logger.warning("DeepL network error: %s", exc)
+            raise TranslationError(msg, original=exc) from exc
+        except TranslationError:
+            raise
         except Exception as exc:
-            logger.exception("DeepL translation error")
-            raise TranslationError(
-                f"DeepL translation failed: {exc}", original=exc
-            ) from exc
+            exc_name = type(exc).__name__
+            exc_str = str(exc)
+            if "AuthorizationException" in exc_name or "unauthorized" in exc_str.lower() or "403" in exc_str:
+                msg = "⚠️ Translation Error: Invalid or unauthorized DeepL API Key. Please check your settings."
+            elif "ApiKeyException" in exc_name or "api_key" in exc_str.lower():
+                msg = "⚠️ Translation Error: DeepL API Key is missing or invalid. Please check your settings."
+            elif "TooManyRequests" in exc_name or "quota" in exc_str.lower() or "429" in exc_str:
+                msg = "⚠️ Translation Error: DeepL quota or rate limit exceeded. Please check your account."
+            else:
+                msg = f"⚠️ Translation Error: DeepL translation failed ({exc_str})."
+            logger.warning("DeepL translation error: %s", exc)
+            raise TranslationError(msg, original=exc) from exc
 
     def detect_language(self, text: str) -> str:
         """Detect language using high-accuracy *lingua* with confidence bounds."""
@@ -849,8 +901,8 @@ def _make_backend(name: str, **kwargs: Any) -> TranslationBackend:
     if name == "google":
         return GoogleTranslateBackend()
     if name == "deepl":
-        api_key = kwargs.get("api_key", "")
-        use_free_api = kwargs.get("use_free_api", True)
+        api_key = kwargs.get("api_key", "").strip()
+        use_free_api = True if api_key.endswith(":fx") else kwargs.get("use_free_api", False)
         return DeepLBackend(api_key=api_key, use_free_api=use_free_api)
     if name == "libretranslate":
         base_url = kwargs.get("base_url", "https://libretranslate.com")
@@ -1142,8 +1194,16 @@ class TranslationWorker(QThread):
                     if isinstance(res, tuple) and len(res) == 2:
                         translated, detected = res
                         use_single_call = True
-                except Exception:
-                    pass
+                except TranslationError:
+                    raise
+                except Exception as exc:
+                    exc_name = type(exc).__name__
+                    if "AuthorizationException" in exc_name or "unauthorized" in str(exc).lower():
+                        raise TranslationError(
+                            "⚠️ Translation Error: Invalid or unauthorized DeepL API Key. Please check your settings.",
+                            original=exc,
+                        ) from exc
+                    logger.debug("translate_with_detection failed (%s), falling back to two-step", exc)
 
             if not use_single_call:
                 if source_lang == "auto":
@@ -1200,13 +1260,23 @@ class TranslationWorker(QThread):
 
             self.finished.emit(self._text, translated, detected, target_lang, self._request_id)
         except TranslationError as exc:
-            logger.error("TranslationWorker error: %s", exc.message)
+            logger.warning("TranslationWorker error: %s", exc.message)
             if not self._is_cancelled:
-                self.error.emit(exc.message, self._request_id)
+                err_msg = exc.message
+                if not err_msg.startswith("⚠️"):
+                    err_msg = f"⚠️ Translation Error: {err_msg}"
+                self.error.emit(err_msg, self._request_id)
         except Exception as exc:
-            logger.exception("Unexpected error in TranslationWorker")
+            logger.warning("Unexpected error in TranslationWorker: %s", exc)
             if not self._is_cancelled:
-                self.error.emit(str(exc), self._request_id)
+                exc_str = str(exc)
+                if "AuthorizationException" in type(exc).__name__ or "unauthorized" in exc_str.lower():
+                    err_msg = "⚠️ Translation Error: Invalid or unauthorized DeepL API Key. Please check your settings."
+                elif "ApiKeyException" in type(exc).__name__:
+                    err_msg = "⚠️ Translation Error: DeepL API Key is missing or invalid. Please check your settings."
+                else:
+                    err_msg = f"⚠️ Translation Error: {exc_str}"
+                self.error.emit(err_msg, self._request_id)
         finally:
             self.worker_done.emit()
 

@@ -322,6 +322,14 @@ class TranslationPopup(QWidget):
         self._loading_timer.start()
         self.retranslate_requested.emit(text, source_code, target_code)
 
+    def set_error(self, error_message: str) -> None:
+        """Display an error message directly inside target text area and stop loading state."""
+        self._loading_timer.stop()
+        self._lbl_loading.hide()
+        self._translated_text = error_message
+        self._txt_result.setPlainText(error_message)
+        self.adjustSize()
+
     def set_translation(
         self,
         source_text: str,
@@ -332,6 +340,10 @@ class TranslationPopup(QWidget):
         """Update popup contents once background translation finishes."""
         self._loading_timer.stop()
         self._lbl_loading.hide()
+
+        if translated_text.startswith("⚠️") or translated_text.startswith("Error:"):
+            self.set_error(translated_text)
+            return
 
         # Update source text only if not currently matching and not actively being typed
         if source_text and self._txt_source.toPlainText() != source_text:

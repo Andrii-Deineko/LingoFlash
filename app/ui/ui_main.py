@@ -1249,6 +1249,14 @@ class MainWindow(QMainWindow):
         self._txt_source.setPlainText(text)
         self._trigger_translation(force=True)
 
+    def set_translation_error(self, error_message: str) -> None:
+        """Display an error message directly inside target text area and stop loading state."""
+        self.set_loading(False)
+        self._txt_target.setPlainText(error_message)
+        self._lbl_target_char_count.setText("")
+        self._lbl_detected.setText("")
+        self._status_bar.showMessage(error_message, 6000)
+
     def set_translation_result(
         self,
         source_text: str,
@@ -1258,6 +1266,10 @@ class MainWindow(QMainWindow):
     ) -> None:
         """Update target translation field, character count, and history."""
         self.set_loading(False)
+        if translated_text.startswith("⚠️") or translated_text.startswith("Error:"):
+            self.set_translation_error(translated_text)
+            return
+
         self._txt_target.setPlainText(translated_text)
         if translated_text:
             self._lbl_target_char_count.setText(f"{len(translated_text)} characters")
