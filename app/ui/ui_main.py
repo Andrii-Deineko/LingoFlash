@@ -45,12 +45,14 @@ from PyQt6.QtWidgets import (
 
 from app.clipboard.clipboard_manager import ClipboardManager
 from app.audio.voice_input import VoiceInputWorker
+from app.audio.tts_engine import TTSManager
 from app.utils.shortcuts import DEFAULT_SHORTCUTS, apply_gnome_shortcuts
 from app.utils.theme import get_available_themes, get_stylesheet, create_svg_icon, get_theme_palette, get_app_icon
 from app.utils.i18n import SUPPORTED_LOCALES, tr, set_current_locale, get_current_locale
 from app.translation.translator import (
     TranslationManager,
     TranslationHistory,
+    detect_language,
 )
 
 logger = logging.getLogger(__name__)
@@ -135,7 +137,12 @@ LANGUAGE_NAME_MAP: dict[str, str] = {code: name for code, name in LANGUAGES}
 
 
 class SearchableComboBox(QComboBox):
-    """Editable dropdown with live substring filter, forgiving QCompleter, and validation."""
+    """Editable dropdown with live substring filter, forgiving QCompleter, and validation.
+
+    Strictly separates:
+    - DisplayRole: The localized human-readable language string (e.g., 'Auto Detect', 'English').
+    - UserRole: The internal language code (e.g., 'auto', 'en', 'sv').
+    """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -160,6 +167,76 @@ class SearchableComboBox(QComboBox):
             line_edit.installEventFilter(self)
             line_edit.editingFinished.connect(self._validate_and_reconcile)
             line_edit.returnPressed.connect(self._validate_and_reconcile)
+
+    def add_language_item(self, display_name: str, code: str) -> None:
+        """Add a language item ensuring DisplayRole and UserRole are distinct."""
+        idx = self.count()
+        self.addItem(display_name, code)
+        self.setItemData(idx, display_name, Qt.ItemDataRole.DisplayRole)
+        self.setItemData(idx, code, Qt.ItemDataRole.UserRole)
+
+    def get_selected_code(self) -> str:
+        """Strictly retrieve the internal standard language code (UserRole), never the display text."""
+        # 1. Check if line edit text differs from currently selected item text (user typed custom search)
+        line_edit = self.lineEdit()
+        if line_edit is not None:
+            text = line_edit.text().strip().lower()
+            current_disp = self.itemText(self.currentIndex()).strip().lower() if self.currentIndex() >= 0 else ""
+            if text and text != current_disp:
+                # User typed something: check UserRole code match first
+                for i in range(self.count()):
+                    code_i = str(self.itemData(i, Qt.ItemDataRole.UserRole) or "").lower()
+                    if code_i == text:
+                        return code_i
+                # Check DisplayRole match
+                for i in range(self.count()):
+                    disp_i = str(self.itemText(i) or "").strip().lower()
+                    if disp_i == text or (text in disp_i and len(text) > 2):
+                        return str(self.itemData(i, Qt.ItemDataRole.UserRole) or "auto")
+
+        # 2. Direct UserRole data from current index
+        idx = self.currentIndex()
+        if idx >= 0:
+            val = self.itemData(idx, Qt.ItemDataRole.UserRole)
+            if val:
+                return str(val)
+
+        data = super().currentData(Qt.ItemDataRole.UserRole)
+        if data:
+            return str(data)
+
+        # Fallback to index 0 (typically 'auto' or default)
+        if self.count() > 0:
+            return str(self.itemData(0, Qt.ItemDataRole.UserRole) or "auto")
+        return "auto"
+
+    def set_selected_code(self, code: str) -> bool:
+        """Select an item strictly by its internal language code (UserRole)."""
+        idx = self.findData(code, Qt.ItemDataRole.UserRole)
+        if idx >= 0:
+            self.setCurrentIndex(idx)
+            self.setEditText(self.itemText(idx))
+            self._last_valid_index = idx
+            return True
+        return False
+
+    def update_item_display_text(self, code: str, new_display_text: str) -> None:
+        """Update DisplayRole text without changing the underlying UserRole code."""
+        idx = self.findData(code, Qt.ItemDataRole.UserRole)
+        if idx >= 0:
+            self.setItemData(idx, new_display_text, Qt.ItemDataRole.DisplayRole)
+            self.setItemText(idx, new_display_text)
+            if self.currentIndex() == idx:
+                self.setEditText(new_display_text)
+
+    def currentData(self, role: int = Qt.ItemDataRole.UserRole) -> Any:  # noqa: N802
+        """Override currentData to guarantee standard code is returned for UserRole."""
+        val = super().currentData(role)
+        if val is not None and val != "":
+            return val
+        if role == Qt.ItemDataRole.UserRole:
+            return self.get_selected_code()
+        return val
 
     def eventFilter(self, watched, event) -> bool:  # noqa: ANN001
         """Auto-select all text on click for instant search replacement."""
@@ -190,12 +267,19 @@ class SearchableComboBox(QComboBox):
             self.setEditText(self.itemText(self._last_valid_index))
             return
 
-        # 1. Exact match
+        # 1. Check if user typed an exact internal code (UserRole)
+        for i in range(self.count()):
+            if str(self.itemData(i, Qt.ItemDataRole.UserRole)).lower() == text.lower():
+                self.setCurrentIndex(i)
+                self.setEditText(self.itemText(i))
+                return
+
+        # 2. Exact match on DisplayRole
         idx = self.findText(text, Qt.MatchFlag.MatchExactly)
-        # 2. Case-insensitive prefix match
+        # 3. Case-insensitive prefix match
         if idx < 0:
             idx = self.findText(text, Qt.MatchFlag.MatchStartsWith)
-        # 3. Substring match
+        # 4. Substring match
         if idx < 0:
             idx = self.findText(text, Qt.MatchFlag.MatchContains)
 
@@ -806,6 +890,12 @@ class MainWindow(QMainWindow):
         self._voice_worker: Optional[VoiceInputWorker] = None
         self._is_recording = False
 
+        # Text-to-Speech (TTS) manager
+        self._tts_manager = TTSManager(self)
+        self._tts_manager.state_changed.connect(self._on_tts_state_changed)
+        self._tts_manager.error_occurred.connect(self._on_tts_error)
+        self._last_detected_source_lang: str = ""
+
         # Spinner animation timer
         self._spinner_dots = 0
         self._spinner_timer = QTimer(self)
@@ -928,6 +1018,14 @@ class MainWindow(QMainWindow):
         self._btn_mic.setToolTip("Voice Input (Click to speak)")
         self._btn_mic.clicked.connect(self._toggle_voice_input)
 
+        self._btn_tts_source = QPushButton(self)
+        self._btn_tts_source.setObjectName("ttsSourceBtn")
+        self._btn_tts_source.setProperty("active", "false")
+        self._btn_tts_source.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_tts_source.setIcon(create_svg_icon("speaker", color="#A1A1AA", size=16))
+        self._btn_tts_source.setToolTip("Listen (Text-to-Speech)")
+        self._btn_tts_source.clicked.connect(self._play_source_tts)
+
         self._lbl_char_count = QLabel("0 characters", self)
         self._lbl_char_count.setStyleSheet("color: #888888; font-size: 11px;")
 
@@ -937,6 +1035,7 @@ class MainWindow(QMainWindow):
 
         left_footer.addWidget(self._btn_clear_source)
         left_footer.addWidget(self._btn_mic)
+        left_footer.addWidget(self._btn_tts_source)
         left_footer.addWidget(self._lbl_char_count)
         left_footer.addStretch()
         left_footer.addWidget(self._lbl_spinner)
@@ -1001,10 +1100,19 @@ class MainWindow(QMainWindow):
         self._btn_copy.setToolTip("Copy translated text to clipboard")
         self._btn_copy.clicked.connect(self._copy_result)
 
+        self._btn_tts_target = QPushButton(self)
+        self._btn_tts_target.setObjectName("ttsTargetBtn")
+        self._btn_tts_target.setProperty("active", "false")
+        self._btn_tts_target.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_tts_target.setIcon(create_svg_icon("speaker", color="#A1A1AA", size=16))
+        self._btn_tts_target.setToolTip("Listen (Text-to-Speech)")
+        self._btn_tts_target.clicked.connect(self._play_target_tts)
+
         self._lbl_target_char_count = QLabel("", self)
         self._lbl_target_char_count.setStyleSheet("color: #888888; font-size: 11px;")
 
         right_footer.addWidget(self._btn_copy)
+        right_footer.addWidget(self._btn_tts_target)
         right_footer.addWidget(self._lbl_target_char_count)
         right_footer.addStretch()
         right_layout.addLayout(right_footer)
@@ -1157,7 +1265,8 @@ class MainWindow(QMainWindow):
             self._lbl_target_char_count.setText("")
 
         # Dynamic Auto Detect feedback
-        current_src_code = self._cmb_source_lang.currentData()
+        self._last_detected_source_lang = source_lang
+        current_src_code = self._cmb_source_lang.get_selected_code()
         if self._txt_source.toPlainText().strip() and source_lang and source_lang != "auto":
             lang_name = LANGUAGE_NAME_MAP.get(source_lang, source_lang.upper())
             if current_src_code == "auto":
@@ -1172,6 +1281,7 @@ class MainWindow(QMainWindow):
 
     def _swap_languages(self) -> None:
         """Swap languages and texts between source and target."""
+        self._tts_manager.stop()
         self._lbl_detected.setText("")
         src_code = self._cmb_source_lang.currentData()
         tgt_code = self._cmb_target_lang.currentData()
@@ -1197,6 +1307,8 @@ class MainWindow(QMainWindow):
 
     def _clear_source(self) -> None:
         """Clear source and target fields."""
+        self._tts_manager.stop()
+        self._last_detected_source_lang = ""
         self._debounce_timer.stop()
         self._txt_source.clear()
         self._txt_target.clear()
@@ -1282,9 +1394,11 @@ class MainWindow(QMainWindow):
         self._btn_swap.setToolTip(tr("swap_languages", loc))
 
         # Update Auto Detect item text in source combo
-        idx_auto = self._cmb_source_lang.findData("auto")
-        if idx_auto >= 0:
-            self._cmb_source_lang.setItemText(idx_auto, tr("auto_detect", loc))
+        self._cmb_source_lang.update_item_display_text("auto", tr("auto_detect", loc))
+        if hasattr(self, "_btn_tts_source"):
+            self._btn_tts_source.setToolTip(tr("listen", loc))
+        if hasattr(self, "_btn_tts_target"):
+            self._btn_tts_target.setToolTip(tr("listen", loc))
 
         self._update_status_bar()
         self._refresh_history_list()
@@ -1317,7 +1431,9 @@ class MainWindow(QMainWindow):
 
     def _start_voice_input(self) -> None:
         """Start capturing microphone audio in background thread."""
-        src_code = self._cmb_source_lang.currentData() or "en"
+        self._tts_manager.stop()
+        src_code = self._cmb_source_lang.get_selected_code()
+        logger.info("Starting voice input with standard code: %s", src_code)
         self._is_recording = True
         self._btn_mic.setProperty("active", "true")
         self._btn_mic.setStyle(self._btn_mic.style())
@@ -1342,6 +1458,57 @@ class MainWindow(QMainWindow):
         finally:
             self._voice_worker = None
         self._on_voice_finished()
+
+    # --- Text-to-Speech (TTS) Playback ---
+
+    def _play_source_tts(self) -> None:
+        """Play TTS for source text area with accurate pronunciation language."""
+        text = self._txt_source.toPlainText().strip()
+        if not text:
+            return
+
+        src_code = self._cmb_source_lang.get_selected_code()
+        if src_code == "auto":
+            if self._last_detected_source_lang and self._last_detected_source_lang != "auto":
+                lang_code = self._last_detected_source_lang
+            else:
+                detected = detect_language(text)
+                lang_code = detected if detected and detected != "auto" else "en"
+        else:
+            lang_code = src_code
+
+        logger.info("Source TTS requested (lang=%s, chars=%d)", lang_code, len(text))
+        self._tts_manager.play_or_toggle("source", text, lang_code)
+
+    def _play_target_tts(self) -> None:
+        """Play TTS for target text area with target pronunciation language."""
+        text = self._txt_target.toPlainText().strip()
+        if not text:
+            return
+
+        tgt_code = self._cmb_target_lang.get_selected_code()
+        logger.info("Target TTS requested (lang=%s, chars=%d)", tgt_code, len(text))
+        self._tts_manager.play_or_toggle("target", text, tgt_code)
+
+    def _on_tts_state_changed(self, role: str, is_playing: bool) -> None:
+        """Update Speaker button icon color and active state during playback."""
+        active_color = "#3B82F6"
+        inactive_color = "#A1A1AA"
+        btn = self._btn_tts_source if role == "source" else self._btn_tts_target
+
+        if is_playing:
+            btn.setProperty("active", "true")
+            btn.setIcon(create_svg_icon("speaker", color=active_color, size=16))
+            btn.setStyle(btn.style())
+            self._status_bar.showMessage(f"Playing audio ({role})…")
+        else:
+            btn.setProperty("active", "false")
+            btn.setIcon(create_svg_icon("speaker", color=inactive_color, size=16))
+            btn.setStyle(btn.style())
+
+    def _on_tts_error(self, role: str, message: str) -> None:
+        """Handle and display TTS playback errors."""
+        self._status_bar.showMessage(f"Audio error: {message}", 4000)
 
     def _on_voice_text_captured(self, text: str) -> None:
         """Append transcribed speech to source text and move cursor."""
@@ -1403,6 +1570,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """Hide window instead of closing completely (persists in background)."""
+        self._tts_manager.stop()
         self._stop_voice_input()
         event.ignore()
         self.hide()

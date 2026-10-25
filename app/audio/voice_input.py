@@ -11,9 +11,11 @@ logger = logging.getLogger(__name__)
 
 # Map 2-letter language codes to BCP-47 speech recognition locales
 LANGUAGE_TO_SPEECH_LOCALE: dict[str, str] = {
-    "auto": "en-US",
+    "auto": "auto",
     "en": "en-US",
+    "sv": "sv-SE",
     "uk": "uk-UA",
+    "ru": "ru-RU",
     "de": "de-DE",
     "fr": "fr-FR",
     "es": "es-ES",
@@ -21,10 +23,24 @@ LANGUAGE_TO_SPEECH_LOCALE: dict[str, str] = {
     "pl": "pl-PL",
     "pt": "pt-PT",
     "nl": "nl-NL",
-    "ru": "ru-RU",
     "zh-CN": "zh-CN",
+    "zh-TW": "zh-TW",
     "ja": "ja-JP",
     "ko": "ko-KR",
+    "ar": "ar-SA",
+    "cs": "cs-CZ",
+    "da": "da-DK",
+    "fi": "fi-FI",
+    "el": "el-GR",
+    "he": "he-IL",
+    "hi": "hi-IN",
+    "hu": "hu-HU",
+    "id": "id-ID",
+    "no": "no-NO",
+    "ro": "ro-RO",
+    "sk": "sk-SK",
+    "tr": "tr-TR",
+    "vi": "vi-VN",
 }
 
 
@@ -45,13 +61,21 @@ class VoiceInputWorker(QThread):
 
     def __init__(
         self,
-        language_code: str = "en",
+        language_code: str = "auto",
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
-        self._lang_code = language_code
-        self._speech_locale = LANGUAGE_TO_SPEECH_LOCALE.get(language_code, "en-US")
+        self._lang_code = language_code or "auto"
+        if self._lang_code == "auto":
+            self._speech_locale = "auto"
+        else:
+            self._speech_locale = LANGUAGE_TO_SPEECH_LOCALE.get(self._lang_code, self._lang_code)
         self._is_active = True
+
+    @property
+    def language_code(self) -> str:
+        """Return the standard language code assigned to this worker."""
+        return self._lang_code
 
     def stop(self) -> None:
         """Request immediate worker stop."""
@@ -84,7 +108,11 @@ class VoiceInputWorker(QThread):
                     return
 
                 self.status_changed.emit("Listening… Speak into microphone")
-                logger.info("VoiceInputWorker listening (locale=%s)", self._speech_locale)
+                logger.info(
+                    "VoiceInputWorker listening (lang_code=%s, locale=%s)",
+                    self._lang_code,
+                    self._speech_locale,
+                )
 
                 # Listen for speech with a timeout
                 audio = recognizer.listen(source, timeout=6.0, phrase_time_limit=15.0)
@@ -94,7 +122,17 @@ class VoiceInputWorker(QThread):
                 return
 
             self.status_changed.emit("Transcribing audio…")
-            text = recognizer.recognize_google(audio, language=self._speech_locale)
+
+            # Perform transcription with requested locale (or fallback if 'auto' fails)
+            try:
+                text = recognizer.recognize_google(audio, language=self._speech_locale)
+            except Exception as exc:
+                if self._speech_locale == "auto":
+                    logger.debug("recognize_google with 'auto' failed (%s), trying 'en-US'", exc)
+                    text = recognizer.recognize_google(audio, language="en-US")
+                else:
+                    raise
+
             if text and text.strip():
                 logger.info("Transcribed text: %s", text)
                 self.text_captured.emit(text.strip())

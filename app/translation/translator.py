@@ -182,6 +182,14 @@ _MYMEMORY_LANG_MAP: dict[str, str] = {
 }
 
 
+def detect_language(text: str) -> str:
+    """Detect the language code of the given text using Lingua or heuristics."""
+    detected = _detect_language_lingua(text)
+    if detected:
+        return normalize_detected_language(detected, fallback_text=text)
+    return normalize_detected_language("", fallback_text=text)
+
+
 def _cache_get(text: str, source: str, target: str) -> tuple[str, str] | None:
     with _CACHE_LOCK:
         val = _TRANSLATION_CACHE.get((source, target, text.strip()))

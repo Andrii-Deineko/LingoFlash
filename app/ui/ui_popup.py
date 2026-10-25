@@ -375,9 +375,7 @@ class TranslationPopup(QWidget):
         self._btn_open_main.setText(f"↗ {tr('open_main', locale)}")
 
         # Update Auto Detect item text in source combo
-        idx_auto = self._cmb_source_lang.findData("auto")
-        if idx_auto >= 0:
-            self._cmb_source_lang.setItemText(idx_auto, tr("auto_detect", locale))
+        self._cmb_source_lang.update_item_display_text("auto", tr("auto_detect", locale))
 
     def _position_near_cursor(self) -> None:
         """Position the popup close to the mouse cursor without leaving screen."""
