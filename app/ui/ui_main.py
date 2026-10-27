@@ -926,6 +926,12 @@ class MainWindow(QMainWindow):
         icon = get_app_icon()
         if icon is not None and not icon.isNull():
             self.setWindowIcon(icon)
+        else:
+            logo_path = Path(__file__).resolve().parent.parent.parent / "assets" / "logo.svg"
+            if logo_path.is_file():
+                self.setWindowIcon(QIcon(str(logo_path)))
+            elif os.path.isfile("assets/logo.svg"):
+                self.setWindowIcon(QIcon("assets/logo.svg"))
         self.setMinimumSize(920, 620)
         self.resize(980, 680)
 

@@ -63,6 +63,11 @@ def _create_app_icon() -> QIcon:
     icon = get_app_icon()
     if icon is not None and not icon.isNull():
         return icon
+    logo_path = Path(__file__).resolve().parent / "assets" / "logo.svg"
+    if logo_path.is_file():
+        icon = QIcon(str(logo_path))
+        if not icon.isNull():
+            return icon
     icon = QIcon.fromTheme("accessories-text-editor")
     if not icon.isNull():
         return icon
@@ -151,10 +156,22 @@ class LingoFlashApp:
         # Synchronize global desktop shortcuts
         apply_gnome_shortcuts(self._translation_manager.get_shortcuts())
 
+        # Automatically ensure native desktop launcher exists
+        try:
+            from app.utils.desktop import install_desktop_file
+
+            desktop_file = Path.home() / ".local" / "share" / "applications" / "lingoflash.desktop"
+            if not desktop_file.is_file() or getattr(args, "install_desktop", False):
+                install_desktop_file()
+        except Exception as exc:
+            logger.debug("Desktop launcher check: %s", exc)
+
         # If launched with an explicit action, dispatch it (window stays hidden).
         if args.action:
             # Use a single-shot timer so the event loop is running first.
             QTimer.singleShot(0, lambda: self.handle_action(args.action))
+        elif getattr(args, "install_desktop", False) and getattr(args, "hidden", False):
+            QTimer.singleShot(0, self._quit)
         elif not getattr(args, "hidden", False):
             self._show_main_window()
 
@@ -163,7 +180,9 @@ class LingoFlashApp:
     def _create_qapp(self) -> QApplication:
         """Create and configure the global QApplication."""
         app = QApplication(sys.argv)
-        app.setApplicationName(APP_NAME)
+        app.setApplicationName("LingoFlash")
+        app.setApplicationDisplayName("LingoFlash")
+        app.setDesktopFileName("lingoflash.desktop")
         app.setOrganizationName(APP_ORG)
         app.setApplicationVersion(APP_VERSION)
         app.setQuitOnLastWindowClosed(False)
@@ -671,6 +690,11 @@ def _parse_args(args: Optional[list[str]] = None) -> argparse.Namespace:
         "--hidden",
         action="store_true",
         help="Start minimized in system tray without showing main window",
+    )
+    parser.add_argument(
+        "--install-desktop",
+        action="store_true",
+        help="Generate and install lingoflash.desktop launcher into ~/.local/share/applications",
     )
     return parser.parse_args(args)
 

@@ -73,37 +73,65 @@ flowchart TD
 
 ---
 
-## Installation
+## Installation & Desktop Integration
 
-### 1. System Dependencies (Fedora / RHEL)
+### Quick Start (Universal Linux Installer)
 
-Install Tesseract OCR, language training data packs, and clipboard/screenshot utilities:
+Run the automated installer to detect your package manager (Ubuntu/Debian, Fedora, Arch Linux, openSUSE), install dependencies, and register the desktop application launcher:
 
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+Or manually register the native `.desktop` launcher into `~/.local/share/applications`:
+
+```bash
+python3 setup.py install_desktop
+```
+
+---
+
+### Manual System Dependencies by Distribution
+
+#### Fedora / RHEL
 ```bash
 sudo dnf install -y \
-    tesseract \
-    tesseract-langpack-eng \
-    tesseract-langpack-ukr \
-    tesseract-langpack-rus \
-    tesseract-langpack-swe \
-    gnome-screenshot \
-    wl-clipboard
+    tesseract tesseract-langpack-eng tesseract-langpack-ukr tesseract-langpack-rus tesseract-langpack-swe \
+    gnome-screenshot wl-clipboard xclip slurp grim maim
 ```
 
-Or run the bundled automated dependency script:
-
+#### Ubuntu / Debian / Linux Mint / Pop!_OS
 ```bash
-chmod +x fedora-deps.sh
-./fedora-deps.sh
+sudo apt-get update && sudo apt-get install -y \
+    tesseract-ocr tesseract-ocr-eng tesseract-ocr-ukr tesseract-ocr-rus tesseract-ocr-swe \
+    gnome-screenshot wl-clipboard xclip slurp grim scrot
 ```
 
-### 2. Python Environment Setup
+#### Arch Linux / Manjaro / EndeavourOS
+```bash
+sudo pacman -S --needed \
+    tesseract tesseract-data-eng tesseract-data-ukr tesseract-data-rus tesseract-data-swe \
+    wl-clipboard xclip grim slurp maim
+```
+
+#### openSUSE (Leap / Tumbleweed)
+```bash
+sudo zypper install -y \
+    tesseract-ocr tesseract-ocr-traineddata-english tesseract-ocr-traineddata-ukrainian \
+    tesseract-ocr-traineddata-russian tesseract-ocr-traineddata-swedish \
+    wl-clipboard xclip
+```
+
+---
+
+### Python Environment Setup
 
 Clone the repository and install the Python dependencies:
 
 ```bash
-git clone https://github.com/your-username/lingoflash.git
-cd lingoflash
+git clone https://github.com/Andrii-Deineko/LingoFlash.git
+cd LingoFlash
 
 python3 -m venv .venv
 source .venv/bin/activate

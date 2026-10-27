@@ -1,10 +1,11 @@
 [Desktop Entry]
-Type=Application
 Name=LingoFlash
-Comment=Quick desktop translation client
+Comment=Quick desktop translation client with Wayland & X11 OCR
 Exec=python3 /home/andrii/.gemini/antigravity/scratch/translator/main.py
-Icon=accessories-text-editor
+Icon=/home/andrii/.gemini/antigravity/scratch/translator/assets/logo.svg
+Type=Application
+Categories=Utility;Education;Translation;
 Terminal=false
-Categories=Utility;TextTools;
-StartupNotify=false
+StartupWMClass=LingoFlash
+StartupNotify=true
 X-GNOME-Autostart-enabled=true

@@ -253,9 +253,27 @@ class ScreenCapture:
             except Exception as exc:
                 logger.warning("DBus SelectArea exception: %s", exc)
 
-        # 3. Fallback for wlroots Wayland compositors (grim + slurp)
+        # 2. KDE Plasma: spectacle -r -b -n -o output_path
+        if shutil.which("spectacle"):
+            try:
+                logger.debug("Running spectacle -r -b -n -o %s", output_path)
+                res = subprocess.run(
+                    ["spectacle", "-r", "-b", "-n", "-o", output_path],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    check=False,
+                )
+                if res.returncode == 0 and os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+                    logger.info("Captured area via spectacle: %s", output_path)
+                    return output_path
+            except Exception as exc:
+                logger.warning("spectacle execution exception: %s", exc)
+
+        # 3. Wlroots (Wayland): grim -g "$(slurp)" output_path
         if shutil.which("grim") and shutil.which("slurp"):
             try:
+                logger.debug("Running slurp + grim on Wayland")
                 slurp_res = subprocess.run(
                     ["slurp"],
                     capture_output=True,
@@ -275,8 +293,44 @@ class ScreenCapture:
                     if grim_res.returncode == 0 and os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
                         logger.info("Captured area via grim+slurp: %s", output_path)
                         return output_path
+                elif slurp_res.returncode != 0:
+                    logger.info("User cancelled slurp selection")
             except Exception as exc:
                 logger.debug("grim/slurp fallback exception: %s", exc)
+
+        # 4. X11 Fallback 1: scrot -s output_path
+        if shutil.which("scrot"):
+            try:
+                logger.debug("Running scrot -s %s", output_path)
+                res = subprocess.run(
+                    ["scrot", "-s", output_path],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    check=False,
+                )
+                if res.returncode == 0 and os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+                    logger.info("Captured area via scrot: %s", output_path)
+                    return output_path
+            except Exception as exc:
+                logger.warning("scrot execution exception: %s", exc)
+
+        # 5. X11 Fallback 2: maim -s output_path
+        if shutil.which("maim"):
+            try:
+                logger.debug("Running maim -s %s", output_path)
+                res = subprocess.run(
+                    ["maim", "-s", output_path],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    check=False,
+                )
+                if res.returncode == 0 and os.path.isfile(output_path) and os.path.getsize(output_path) > 0:
+                    logger.info("Captured area via maim: %s", output_path)
+                    return output_path
+            except Exception as exc:
+                logger.warning("maim execution exception: %s", exc)
 
         if not os.path.isfile(output_path) or os.path.getsize(output_path) == 0:
             logger.info("Screen capture was cancelled or failed to produce an image")
