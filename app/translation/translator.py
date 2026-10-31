@@ -1070,6 +1070,16 @@ class TranslationManager:
             self.save_config()
             logger.info("Target language set to: %s", lang_code)
 
+    def get_show_quick_popup(self) -> bool:
+        """Return True if the quick popup window should appear on shortcut, False for main window."""
+        return bool(self._config.get("show_quick_popup", True))
+
+    def set_show_quick_popup(self, show: bool) -> None:
+        """Persist user preference for opening quick popup vs main window on shortcut."""
+        self._config["show_quick_popup"] = bool(show)
+        self.save_config()
+        logger.info("Show quick popup on shortcut set to: %s", show)
+
     def get_theme(self) -> str:
         """Return the user's preferred UI theme identifier (defaults to 'system')."""
         return self._config.get("theme", "system")

@@ -32,6 +32,7 @@ from app.ui.ui_main import MainWindow, SettingsDialog
 from app.utils.theme import detect_system_theme, get_stylesheet, get_app_icon
 from app.utils.shortcuts import apply_gnome_shortcuts
 from app.utils.i18n import tr, set_current_locale, get_current_locale
+from app.utils.text import strip_formatting
 
 logger = logging.getLogger(__name__)
 
@@ -273,12 +274,23 @@ class LingoFlashApp:
     # -- translate_selection ----------------------------------------------------
 
     def _do_translate_selection(self) -> None:
-        """Grab the current text selection and translate it in a popup."""
+        """Grab the current text selection and translate it in a popup or main window."""
         text = self._clipboard.get_selected_text()
         if not text or not text.strip():
             logger.info("No text selected – ignoring translate_selection")
             return
-        self._translate_text_in_popup(text.strip())
+        cleaned = strip_formatting(text).strip()
+        if not cleaned:
+            return
+        show_popup = True
+        try:
+            show_popup = self._translation_manager.get_show_quick_popup()
+        except AttributeError:
+            pass
+        if show_popup:
+            self._translate_text_in_popup(cleaned)
+        else:
+            self._show_main_window_with_text(cleaned)
 
     # -- Worker lifecycle management --------------------------------------------
 
@@ -345,12 +357,20 @@ class LingoFlashApp:
 
     def _on_ocr_finished(self, text: str) -> None:
         """Handle successful OCR extraction or cancelled capture."""
-        cleaned = text.strip() if text else ""
+        cleaned = strip_formatting(text).strip() if text else ""
         if not cleaned:
             logger.info("OCR returned empty text or user cancelled selection")
             self._show_ocr_notification("No text detected in screenshot")
             return
-        self._translate_text_in_popup(cleaned)
+        show_popup = True
+        try:
+            show_popup = self._translation_manager.get_show_quick_popup()
+        except AttributeError:
+            pass
+        if show_popup:
+            self._translate_text_in_popup(cleaned)
+        else:
+            self._show_main_window_with_text(cleaned)
 
     def _on_ocr_error(self, message: str) -> None:
         """Log OCR errors and notify user."""

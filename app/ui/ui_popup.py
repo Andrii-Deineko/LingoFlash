@@ -19,9 +19,10 @@ from PyQt6.QtWidgets import (
 )
 
 from app.clipboard.clipboard_manager import ClipboardManager
-from app.ui.ui_main import LANGUAGES, SearchableComboBox
+from app.ui.ui_main import LANGUAGES, SearchableComboBox, PlainTextEdit
 from app.utils.i18n import tr
 from app.utils.theme import get_app_icon
+from app.utils.text import strip_formatting
 
 logger = logging.getLogger(__name__)
 
@@ -163,7 +164,7 @@ class TranslationPopup(QWidget):
         frame_layout.addLayout(source_header)
 
         # Editable source text area
-        self._txt_source = QTextEdit(self._frame)
+        self._txt_source = PlainTextEdit(self._frame)
         self._txt_source.setReadOnly(False)
         self._txt_source.setPlaceholderText("Enter or paste text to translate…")
         self._txt_source.setFrameShape(QFrame.Shape.NoFrame)
@@ -199,7 +200,7 @@ class TranslationPopup(QWidget):
         target_header.addStretch()
         frame_layout.addLayout(target_header)
 
-        self._txt_result = QTextEdit(self._frame)
+        self._txt_result = PlainTextEdit(self._frame)
         self._txt_result.setReadOnly(True)
         self._txt_result.setPlaceholderText("Translation will appear here…")
         self._txt_result.setFrameShape(QFrame.Shape.NoFrame)

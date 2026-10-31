@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Optional, Callable
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QEvent, QSize
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QEvent, QSize, QMimeData
 from PyQt6.QtGui import (
     QIcon,
     QCloseEvent,
@@ -41,6 +41,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QSpinBox,
     QStyle,
+    QCheckBox,
 )
 
 from app.clipboard.clipboard_manager import ClipboardManager
@@ -49,6 +50,7 @@ from app.audio.tts_engine import TTSManager
 from app.utils.shortcuts import DEFAULT_SHORTCUTS, apply_gnome_shortcuts
 from app.utils.theme import get_available_themes, get_stylesheet, create_svg_icon, get_theme_palette, get_app_icon
 from app.utils.i18n import SUPPORTED_LOCALES, tr, set_current_locale, get_current_locale
+from app.utils.text import strip_formatting
 from app.translation.translator import (
     TranslationManager,
     TranslationHistory,
@@ -292,6 +294,25 @@ class SearchableComboBox(QComboBox):
             self.setEditText(self.itemText(self._last_valid_index))
 
 
+class PlainTextEdit(QTextEdit):
+    """QTextEdit subclass that strictly accepts, pastes, and renders unformatted plain text."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setAcceptRichText(False)
+
+    def setPlainText(self, text: str) -> None:
+        """Set plain text content, stripping any HTML tags or rich formatting."""
+        super().setPlainText(strip_formatting(text))
+
+    def insertFromMimeData(self, source: Optional[QMimeData]) -> None:
+        """Strip rich text formatting and HTML when pasting or dropping text."""
+        if source is not None and source.hasText():
+            self.insertPlainText(strip_formatting(source.text()))
+        elif source is not None:
+            super().insertFromMimeData(source)
+
+
 class SettingsDialog(QDialog):
     """Dialog for configuring translation backends, target languages, themes, font sizes, interface localization, and hotkeys."""
 
@@ -312,6 +333,7 @@ class SettingsDialog(QDialog):
         self._initial_ui_font_size = self._manager.get_ui_font_size()
         self._initial_text_font_size = self._manager.get_text_font_size()
         self._initial_ui_lang = self._manager.get_interface_language()
+        self._initial_show_quick_popup = self._manager.get_show_quick_popup()
         self.setWindowTitle(tr("settings_title", self._initial_ui_lang))
         icon = get_app_icon()
         if icon is not None and not icon.isNull():
@@ -418,6 +440,13 @@ class SettingsDialog(QDialog):
         if idx_tgt >= 0:
             self._cmb_default_target.setCurrentIndex(idx_tgt)
         self._form_trans.addRow(self._lbl_default_target, self._cmb_default_target)
+
+        # Quick popup window toggle on shortcut
+        self._lbl_quick_popup = QLabel(tr("quick_popup"), tab_translation)
+        self._chk_quick_popup = QCheckBox(tr("show_quick_popup"), tab_translation)
+        self._chk_quick_popup.setChecked(self._initial_show_quick_popup)
+        self._chk_quick_popup.setToolTip(tr("show_quick_popup_desc"))
+        self._form_trans.addRow(self._lbl_quick_popup, self._chk_quick_popup)
 
         self._tabs.addTab(tab_translation, tr("tab_translation"))
         self._update_backend_visibility()
@@ -679,6 +708,9 @@ class SettingsDialog(QDialog):
         self._lbl_deepl_key.setText(tr("deepl_key", loc))
         self._lbl_libre_url.setText(tr("libre_url", loc))
         self._lbl_default_target.setText(tr("default_target", loc))
+        self._lbl_quick_popup.setText(tr("quick_popup", loc))
+        self._chk_quick_popup.setText(tr("show_quick_popup", loc))
+        self._chk_quick_popup.setToolTip(tr("show_quick_popup_desc", loc))
 
         self._lbl_app_desc.setText(tr("appearance_desc", loc))
         self._lbl_theme.setText(tr("theme", loc))
@@ -764,6 +796,7 @@ class SettingsDialog(QDialog):
         set_current_locale(self._initial_ui_lang)
         self.apply_locale(self._initial_ui_lang)
         self.locale_changed.emit(self._initial_ui_lang)
+        self._chk_quick_popup.setChecked(self._initial_show_quick_popup)
         super().reject()
 
     def _reset_shortcuts_to_default(self) -> None:
@@ -806,6 +839,10 @@ class SettingsDialog(QDialog):
             self._manager.set_backend(chosen_backend, **kwargs)
             if chosen_target:
                 self._manager.set_target_language(chosen_target)
+
+            # Persist show_quick_popup setting
+            self._manager.set_show_quick_popup(self._chk_quick_popup.isChecked())
+            self._initial_show_quick_popup = self._chk_quick_popup.isChecked()
 
             # Persist and apply chosen UI interface language
             chosen_ui_lang = self._cmb_ui_lang.currentData()
@@ -999,7 +1036,7 @@ class MainWindow(QMainWindow):
         left_layout.addLayout(left_header)
 
         # Source Text Area
-        self._txt_source = QTextEdit(self)
+        self._txt_source = PlainTextEdit(self)
         self._txt_source.setFrameShape(QFrame.Shape.NoFrame)
         self._txt_source.setSizePolicy(
             QSizePolicy.Policy.Expanding,
@@ -1087,7 +1124,7 @@ class MainWindow(QMainWindow):
         right_layout.addLayout(right_header)
 
         # Target Text Area
-        self._txt_target = QTextEdit(self)
+        self._txt_target = PlainTextEdit(self)
         self._txt_target.setFrameShape(QFrame.Shape.NoFrame)
         self._txt_target.setSizePolicy(
             QSizePolicy.Policy.Expanding,
