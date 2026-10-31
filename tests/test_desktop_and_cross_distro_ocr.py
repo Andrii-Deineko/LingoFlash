@@ -28,7 +28,7 @@ class TestDesktopDockIntegration(unittest.TestCase):
 
         cls._app.setApplicationName("LingoFlash")
         cls._app.setApplicationDisplayName("LingoFlash")
-        cls._app.setDesktopFileName("lingoflash.desktop")
+        cls._app.setDesktopFileName("lingoflash")
 
     def test_app_identity_metadata_for_wayland(self) -> None:
         """Verify Qt application name and desktop file name are set for Wayland dock pairing."""

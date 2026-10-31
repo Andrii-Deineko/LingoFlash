@@ -32,11 +32,13 @@ logger = logging.getLogger(__name__)
 _DETECTION_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="detector")
 
 # ---------------------------------------------------------------------------
-# Paths
+# Paths (conforming to XDG Base Directory Specification)
 # ---------------------------------------------------------------------------
-_CONFIG_DIR = Path.home() / ".config" / "lingoflash"
+_CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME") or (Path.home() / ".config"))
+_DATA_HOME = Path(os.environ.get("XDG_DATA_HOME") or (Path.home() / ".local" / "share"))
+_CONFIG_DIR = _CONFIG_HOME / "lingoflash"
 _CONFIG_FILE = _CONFIG_DIR / "config.json"
-_DATA_DIR = Path.home() / ".local" / "share" / "lingoflash"
+_DATA_DIR = _DATA_HOME / "lingoflash"
 _HISTORY_FILE = _DATA_DIR / "history.json"
 
 _MAX_HISTORY = 20

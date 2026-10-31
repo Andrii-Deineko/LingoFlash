@@ -11,6 +11,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from typing import Optional, Any
 
 import pytesseract
@@ -19,7 +20,7 @@ from PyQt6.QtCore import QThread, pyqtSignal
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_OCR_IMAGE = "/tmp/lingo_ocr.png"
+DEFAULT_OCR_IMAGE = os.path.join(tempfile.gettempdir(), "lingo_ocr.png")
 
 
 class ScreenCapture:

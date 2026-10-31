@@ -29,7 +29,7 @@ from app.translation.translator import (
 from app.ui.ui_popup import TranslationPopup
 from app.ui.ui_ocr_overlay import OCROverlayWindow
 from app.ui.ui_main import MainWindow, SettingsDialog
-from app.utils.theme import get_stylesheet, get_app_icon
+from app.utils.theme import get_stylesheet, get_app_icon, get_theme_palette
 from app.utils.shortcuts import apply_gnome_shortcuts
 from app.utils.i18n import tr, set_current_locale
 from app.utils.text import strip_formatting
@@ -72,14 +72,17 @@ def _create_app_icon() -> QIcon:
     icon = QIcon.fromTheme("accessories-text-editor")
     if not icon.isNull():
         return icon
+    palette = get_theme_palette("system")
+    accent_color = palette.get("accent", "#1a73e8")
+    accent_text_color = palette.get("accent_text", "#ffffff")
     pixmap = QPixmap(64, 64)
     pixmap.fill(QColor(0, 0, 0, 0))
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setBrush(QColor("#1a73e8"))
+    painter.setBrush(QColor(accent_color))
     painter.setPen(Qt.PenStyle.NoPen)
     painter.drawRoundedRect(4, 4, 56, 56, 12, 12)
-    painter.setPen(QColor("#ffffff"))
+    painter.setPen(QColor(accent_text_color))
     font = QFont("SansSerif", 26, QFont.Weight.Bold)
     painter.setFont(font)
     painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, "文")
@@ -183,7 +186,7 @@ class LingoFlashApp:
         app = QApplication(sys.argv)
         app.setApplicationName("LingoFlash")
         app.setApplicationDisplayName("LingoFlash")
-        app.setDesktopFileName("lingoflash.desktop")
+        app.setDesktopFileName("lingoflash")
         app.setOrganizationName(APP_ORG)
         app.setApplicationVersion(APP_VERSION)
         app.setQuitOnLastWindowClosed(False)
@@ -363,7 +366,7 @@ class LingoFlashApp:
         cleaned = strip_formatting(text).strip() if text else ""
         if not cleaned:
             logger.info("OCR returned empty text or user cancelled selection")
-            self._show_ocr_notification("No text detected in screenshot")
+            self._show_ocr_notification(tr("no_text_detected"))
             return
         show_popup = True
         try:
@@ -378,7 +381,7 @@ class LingoFlashApp:
     def _on_ocr_error(self, message: str) -> None:
         """Log OCR errors and notify user."""
         logger.error("OCR failed: %s", message)
-        self._show_ocr_notification("No text detected in screenshot")
+        self._show_ocr_notification(tr("ocr_failed"))
 
     # -- Comic/Game OCR Overlay -------------------------------------------------
 
@@ -404,7 +407,7 @@ class LingoFlashApp:
         """Handle completed OCR blocks with translated speech bubbles."""
         if not blocks:
             logger.info("OCR overlay returned no text or user cancelled selection")
-            self._show_ocr_notification("No text detected for overlay")
+            self._show_ocr_notification(tr("no_text_detected"))
             return
 
         try:
@@ -423,23 +426,25 @@ class LingoFlashApp:
     def _on_ocr_overlay_error(self, message: str) -> None:
         """Log overlay OCR errors and notify user."""
         logger.error("Overlay OCR failed: %s", message)
-        self._show_ocr_notification("Overlay OCR failed")
+        self._show_ocr_notification(tr("overlay_ocr_failed"))
 
-    def _show_ocr_notification(self, message: str = "No text detected in screenshot") -> None:
+    def _show_ocr_notification(self, message: str | None = None) -> None:
         """Display a subtle notification or tooltip near cursor or via system tray."""
         from PyQt6.QtWidgets import QToolTip
         from PyQt6.QtGui import QCursor
         from PyQt6.QtCore import QRect
 
+        notice_text = message or tr("no_text_detected")
+
         try:
             pos = QCursor.pos()
-            QToolTip.showText(pos, f"ℹ️ {message}", None, QRect(), 3000)
+            QToolTip.showText(pos, f"ℹ️ {notice_text}", None, QRect(), 3000)
         except Exception as exc:
             logger.debug("Failed to show QToolTip: %s", exc)
 
         if hasattr(self, "_tray") and self._tray is not None:
             try:
-                self._tray.showMessage(APP_NAME, message, QSystemTrayIcon.MessageIcon.Information, 2500)
+                self._tray.showMessage(APP_NAME, notice_text, QSystemTrayIcon.MessageIcon.Information, 2500)
             except Exception as exc:
                 logger.debug("Failed to show tray notification: %s", exc)
 
@@ -651,7 +656,9 @@ class LingoFlashApp:
 
         # Ensure IPC socket files are removed cleanly
         import os
-        for sock_path in ("/tmp/LingoFlash", "/tmp/LingoFlash.sock"):
+        import tempfile
+        tmp_dir = tempfile.gettempdir()
+        for sock_path in (os.path.join(tmp_dir, "LingoFlash"), os.path.join(tmp_dir, "LingoFlash.sock")):
             if os.path.exists(sock_path):
                 try:
                     os.unlink(sock_path)

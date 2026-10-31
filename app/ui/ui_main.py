@@ -477,7 +477,7 @@ class SettingsDialog(QDialog):
             tr("appearance_desc"),
             tab_appearance,
         )
-        self._lbl_app_desc.setStyleSheet("color: #a1a1aa; font-size: 12px;")
+        self._lbl_app_desc.setObjectName("formSubLabel")
         vbox_appearance.addWidget(self._lbl_app_desc)
 
         form_appearance = QFormLayout()
@@ -515,14 +515,13 @@ class SettingsDialog(QDialog):
 
         vbox_appearance.addLayout(form_appearance)
 
-        lbl_theme_info = QLabel(
-            "🎨 Includes 11 handcrafted themes: System Auto, Midnight Charcoal (Dark), Clean Modern (Light), "
-            "Nord, Dracula, AMOLED Black, Tokyo Night, Catppuccin, Gruvbox, Solarized Dark/Light, and High Contrast.",
+        self._lbl_theme_info = QLabel(
+            tr("theme_info_desc"),
             tab_appearance,
         )
-        lbl_theme_info.setStyleSheet("color: #71717a; font-size: 11px;")
-        lbl_theme_info.setWordWrap(True)
-        vbox_appearance.addWidget(lbl_theme_info)
+        self._lbl_theme_info.setObjectName("formInfoLabel")
+        self._lbl_theme_info.setWordWrap(True)
+        vbox_appearance.addWidget(self._lbl_theme_info)
         vbox_appearance.addStretch()
 
         self._tabs.addTab(tab_appearance, tr("tab_appearance"))
@@ -537,7 +536,8 @@ class SettingsDialog(QDialog):
             tr("hotkeys_desc"),
             tab_hotkeys,
         )
-        self._lbl_hk_desc.setStyleSheet("color: #a1a1aa; font-size: 12px;")
+        self._lbl_hk_desc.setObjectName("formSubLabel")
+        vbox_hotkeys.addWidget(self._lbl_hk_desc)
         vbox_hotkeys.addWidget(self._lbl_hk_desc)
 
         form_hotkeys = QFormLayout()
@@ -599,13 +599,13 @@ class SettingsDialog(QDialog):
         vbox_hotkeys.addWidget(self._btn_reset_hk, alignment=Qt.AlignmentFlag.AlignLeft)
 
         # Informational note
-        lbl_info = QLabel(
-            "ℹ️ Global shortcuts are automatically bound via GNOME / Wayland (gsettings) on Fedora when saved.",
+        self._lbl_hk_info = QLabel(
+            tr("shortcuts_gnome_note"),
             tab_hotkeys,
         )
-        lbl_info.setStyleSheet("color: #71717a; font-size: 11px;")
-        lbl_info.setWordWrap(True)
-        vbox_hotkeys.addWidget(lbl_info)
+        self._lbl_hk_info.setObjectName("formInfoLabel")
+        self._lbl_hk_info.setWordWrap(True)
+        vbox_hotkeys.addWidget(self._lbl_hk_info)
         vbox_hotkeys.addStretch()
 
         self._tabs.addTab(tab_hotkeys, tr("tab_hotkeys"))
@@ -618,26 +618,6 @@ class SettingsDialog(QDialog):
         self._btn_quit = QPushButton(tr("quit_app"), self)
         self._btn_quit.setObjectName("quitAppBtn")
         self._btn_quit.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_quit.setStyleSheet("""
-            QPushButton#quitAppBtn {
-                background-color: #dc2626;
-                color: #ffffff;
-                font-weight: bold;
-                padding: 6px 16px;
-                border-radius: 6px;
-                border: none;
-                outline: none;
-                font-size: 12px;
-            }
-            QPushButton#quitAppBtn:hover {
-                background-color: #b91c1c;
-                color: #ffffff;
-            }
-            QPushButton#quitAppBtn:pressed {
-                background-color: #991b1b;
-                color: #ffffff;
-            }
-        """)
         self._btn_quit.clicked.connect(self._on_quit_clicked)
         bottom_bar.addWidget(self._btn_quit)
         bottom_bar.addStretch()
@@ -740,6 +720,10 @@ class SettingsDialog(QDialog):
         self._lbl_hk_show.setText(tr("hk_show", loc))
         self._lbl_hk_swap.setText(tr("hk_swap", loc))
         self._btn_reset_hk.setText(tr("reset_defaults", loc))
+        if hasattr(self, "_lbl_theme_info"):
+            self._lbl_theme_info.setText(tr("theme_info_desc", loc))
+        if hasattr(self, "_lbl_hk_info"):
+            self._lbl_hk_info.setText(tr("shortcuts_gnome_note", loc))
 
         self._btn_quit.setText(tr("quit_app", loc))
         if self._btn_save is not None:
@@ -756,9 +740,11 @@ class SettingsDialog(QDialog):
         elif self.parent() and hasattr(self.parent(), "quit_app_requested"):
             self.parent().quit_app_requested.emit()
         else:
-            # Fallback direct cleanup
+            # Fallback direct cleanup using system temp dir
             import os
-            for p in ("/tmp/LingoFlash", "/tmp/LingoFlash.sock"):
+            import tempfile
+            tmp = tempfile.gettempdir()
+            for p in (os.path.join(tmp, "LingoFlash"), os.path.join(tmp, "LingoFlash.sock")):
                 if os.path.exists(p):
                     try:
                         os.unlink(p)
@@ -1004,9 +990,9 @@ class MainWindow(QMainWindow):
         if icon is not None and not icon.isNull():
             self._lbl_logo.setPixmap(icon.pixmap(22, 22))
         lbl_app = QLabel("<b>LingoFlash</b>", self)
-        lbl_app.setStyleSheet("font-size: 16px;")
+        lbl_app.setObjectName("appHeaderTitle")
 
-        self._btn_settings = QPushButton("⚙ Settings", self)
+        self._btn_settings = QPushButton(f"⚙ {tr('settings_title').split(' — ')[0]}", self)
         self._btn_settings.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_settings.clicked.connect(self._open_settings)
 
@@ -1020,6 +1006,10 @@ class MainWindow(QMainWindow):
         self._splitter = QSplitter(Qt.Orientation.Horizontal, central_widget)
         self._splitter.setChildrenCollapsible(False)
         self._splitter.setHandleWidth(10)
+
+        # Resolve dynamic theme colors for icons
+        theme_palette = get_theme_palette(self._manager.get_theme())
+        speaker_color = theme_palette.get("text_muted", theme_palette.get("text_secondary", "#A1A1AA"))
 
         # --- Left Pane (Source) ---
         left_widget = QWidget(self)
@@ -1035,8 +1025,8 @@ class MainWindow(QMainWindow):
         left_header = QHBoxLayout()
         left_header.setContentsMargins(0, 0, 0, 0)
         left_header.setSpacing(8)
-        self._lbl_from = QLabel("From:", self)
-        self._lbl_from.setStyleSheet("font-weight: 500;")
+        self._lbl_from = QLabel(tr("from"), self)
+        self._lbl_from.setObjectName("langHeaderLabel")
         self._cmb_source_lang = SearchableComboBox(self)
         for code, name in LANGUAGES:
             self._cmb_source_lang.addItem(name, code)
@@ -1058,7 +1048,7 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
         )
-        self._txt_source.setPlaceholderText("Type or paste text to translate...")
+        self._txt_source.setPlaceholderText(tr("source_placeholder"))
         self._txt_source.textChanged.connect(self._on_source_text_changed)
         left_layout.addWidget(self._txt_source)
 
@@ -1067,30 +1057,30 @@ class MainWindow(QMainWindow):
         left_footer.setContentsMargins(0, 4, 0, 0)
         left_footer.setSpacing(10)
 
-        self._btn_clear_source = QPushButton("🗑 Clear", self)
+        self._btn_clear_source = QPushButton(f"🗑 {tr('clear_history').split()[0]}", self)
         self._btn_clear_source.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_clear_source.setToolTip("Clear source text")
+        self._btn_clear_source.setToolTip(tr("clear_source_tooltip"))
         self._btn_clear_source.clicked.connect(self._clear_source)
 
-        self._btn_mic = QPushButton("🎙 Voice", self)
+        self._btn_mic = QPushButton(f"🎙 {tr('voice')}", self)
         self._btn_mic.setObjectName("micBtn")
         self._btn_mic.setProperty("active", "false")
         self._btn_mic.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_mic.setToolTip("Voice Input (Click to speak)")
+        self._btn_mic.setToolTip(tr("voice_tooltip"))
         self._btn_mic.clicked.connect(self._toggle_voice_input)
 
         self._btn_tts_source = QPushButton(self)
         self._btn_tts_source.setObjectName("ttsSourceBtn")
         self._btn_tts_source.setProperty("active", "false")
         self._btn_tts_source.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_tts_source.setIcon(create_svg_icon("speaker", color="#A1A1AA", size=16))
-        self._btn_tts_source.setToolTip("Listen (Text-to-Speech)")
+        self._btn_tts_source.setIcon(create_svg_icon("speaker", color=speaker_color, size=16))
+        self._btn_tts_source.setToolTip(tr("listen"))
         self._btn_tts_source.clicked.connect(self._play_source_tts)
 
-        self._lbl_char_count = QLabel("0 characters", self)
-        self._lbl_char_count.setStyleSheet("color: #888888; font-size: 11px;")
+        self._lbl_char_count = QLabel(tr("char_count_zero"), self)
+        self._lbl_char_count.setObjectName("charCountLabel")
 
-        self._lbl_spinner = QLabel("Translating…", self)
+        self._lbl_spinner = QLabel(tr("translating"), self)
         self._lbl_spinner.setObjectName("spinnerLabel")
         self._lbl_spinner.hide()
 
@@ -1116,8 +1106,8 @@ class MainWindow(QMainWindow):
         right_header = QHBoxLayout()
         right_header.setContentsMargins(14, 0, 0, 0)
         right_header.setSpacing(8)
-        self._lbl_to = QLabel("To:", self)
-        self._lbl_to.setStyleSheet("font-weight: 500;")
+        self._lbl_to = QLabel(tr("to"), self)
+        self._lbl_to.setObjectName("langHeaderLabel")
         self._cmb_target_lang = SearchableComboBox(self)
         for code, name in LANGUAGES:
             if code != "auto":
@@ -1147,7 +1137,7 @@ class MainWindow(QMainWindow):
             QSizePolicy.Policy.Expanding,
         )
         self._txt_target.setReadOnly(True)
-        self._txt_target.setPlaceholderText("Translation will appear here automatically...")
+        self._txt_target.setPlaceholderText(tr("target_placeholder"))
         right_layout.addWidget(self._txt_target)
 
         # Right Footer (symmetrical with Left Footer)
@@ -1155,22 +1145,22 @@ class MainWindow(QMainWindow):
         right_footer.setContentsMargins(0, 4, 0, 0)
         right_footer.setSpacing(10)
 
-        self._btn_copy = QPushButton("📋 Copy", self)
+        self._btn_copy = QPushButton(f"📋 {tr('copy')}", self)
         self._btn_copy.setObjectName("copyBtn")
         self._btn_copy.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_copy.setToolTip("Copy translated text to clipboard")
+        self._btn_copy.setToolTip(tr("copy_tooltip"))
         self._btn_copy.clicked.connect(self._copy_result)
 
         self._btn_tts_target = QPushButton(self)
         self._btn_tts_target.setObjectName("ttsTargetBtn")
         self._btn_tts_target.setProperty("active", "false")
         self._btn_tts_target.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_tts_target.setIcon(create_svg_icon("speaker", color="#A1A1AA", size=16))
-        self._btn_tts_target.setToolTip("Listen (Text-to-Speech)")
+        self._btn_tts_target.setIcon(create_svg_icon("speaker", color=speaker_color, size=16))
+        self._btn_tts_target.setToolTip(tr("listen"))
         self._btn_tts_target.clicked.connect(self._play_target_tts)
 
         self._lbl_target_char_count = QLabel("", self)
-        self._lbl_target_char_count.setStyleSheet("color: #888888; font-size: 11px;")
+        self._lbl_target_char_count.setObjectName("charCountLabel")
 
         right_footer.addWidget(self._btn_copy)
         right_footer.addWidget(self._btn_tts_target)
@@ -1189,7 +1179,7 @@ class MainWindow(QMainWindow):
         # Circular Swap button positioned over splitter handle between headers
         self._btn_swap = QPushButton("⇄", central_widget)
         self._btn_swap.setObjectName("swapBtn")
-        self._btn_swap.setToolTip("Swap languages and text")
+        self._btn_swap.setToolTip(tr("swap_languages"))
         self._btn_swap.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_swap.setFixedSize(32, 32)
         self._btn_swap.clicked.connect(self._swap_languages)
@@ -1199,12 +1189,14 @@ class MainWindow(QMainWindow):
         history_header = QHBoxLayout()
         history_header.setContentsMargins(0, 4, 0, 0)
 
-        self._btn_toggle_history = QPushButton("▶ Translation History (0)", self)
+        self._btn_toggle_history = QPushButton(f"▶ {tr('history_title')} (0)", self)
         self._btn_toggle_history.setObjectName("historyToggleBtn")
         self._btn_toggle_history.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_toggle_history.clicked.connect(self._toggle_history)
 
-        self._btn_clear_history = QPushButton("Clear", self)
+        self._btn_clear_history = QPushButton(tr("clear_history"), self)
+        self._btn_clear_history.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_clear_history.clicked.connect(self._clear_history)
         self._btn_clear_history.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_clear_history.clicked.connect(self._clear_history)
 
@@ -1229,12 +1221,12 @@ class MainWindow(QMainWindow):
             backend_name = self._manager.backend.name
         except Exception:
             backend_name = "Unknown"
-        self._status_bar.showMessage(f"Active Backend: {backend_name} | {tr('ready')}")
+        self._status_bar.showMessage(f"{tr('active_backend')} {backend_name} | {tr('ready')}")
 
     def _on_source_text_changed(self) -> None:
         """Triggered on every keystroke in source text box."""
         text = self._txt_source.toPlainText()
-        self._lbl_char_count.setText(f"{len(text)} {tr('characters')}")
+        self._lbl_char_count.setText(tr("char_count", count=len(text)))
 
         if text.strip():
             # Restart the 300ms aggressive debounce timer
@@ -1292,7 +1284,7 @@ class MainWindow(QMainWindow):
             self._lbl_spinner.show()
             self._spinner_timer.start()
             tgt_code = self._cmb_target_lang.currentData() or "en"
-            self._status_bar.showMessage(f"Translating to {tgt_code.upper()}…")
+            self._status_bar.showMessage(f"{tr('translating')} ({tgt_code.upper()})")
         else:
             self._spinner_timer.stop()
             self._lbl_spinner.hide()
@@ -1300,7 +1292,8 @@ class MainWindow(QMainWindow):
     def _animate_spinner(self) -> None:
         """Cycle subtle animated dots while translation is in progress."""
         self._spinner_dots = (self._spinner_dots + 1) % 4
-        self._lbl_spinner.setText("Translating" + "." * self._spinner_dots)
+        base_translating = tr("translating").rstrip(".")
+        self._lbl_spinner.setText(base_translating + "." * self._spinner_dots)
 
     def set_source_text(self, text: str) -> None:
         """Populate the source text field and trigger immediate translation."""
@@ -1333,7 +1326,7 @@ class MainWindow(QMainWindow):
 
         self._txt_target.setPlainText(translated_text)
         if translated_text:
-            self._lbl_target_char_count.setText(f"{len(translated_text)} characters")
+            self._lbl_target_char_count.setText(tr("char_count", count=len(translated_text)))
         else:
             self._lbl_target_char_count.setText("")
 
@@ -1385,7 +1378,7 @@ class MainWindow(QMainWindow):
         self._debounce_timer.stop()
         self._txt_source.clear()
         self._txt_target.clear()
-        self._lbl_char_count.setText("0 characters")
+        self._lbl_char_count.setText(tr("char_count_zero"))
         self._lbl_target_char_count.setText("")
         self._lbl_detected.setText("")
         self._last_requested_key = ("", "", "")
@@ -1430,7 +1423,7 @@ class MainWindow(QMainWindow):
         self._lst_history.setVisible(not self._history_collapsed)
         arrow = "▶" if self._history_collapsed else "▼"
         count = len(self._history.get_all())
-        self._btn_toggle_history.setText(f"{arrow} Translation History ({count})")
+        self._btn_toggle_history.setText(f"{arrow} {tr('history_title')} ({count})")
 
     def _refresh_history_list(self) -> None:
         """Populate history list items and update accordion header count."""
@@ -1447,7 +1440,7 @@ class MainWindow(QMainWindow):
             self._lst_history.addItem(list_item)
 
         arrow = "▶" if self._history_collapsed else "▼"
-        self._btn_toggle_history.setText(f"{arrow} Translation History ({len(entries)})")
+        self._btn_toggle_history.setText(f"{arrow} {tr('history_title')} ({len(entries)})")
 
     def _on_history_item_clicked(self, item: QListWidgetItem) -> None:
         """Load clicked history entry into translation panes."""
@@ -1471,7 +1464,7 @@ class MainWindow(QMainWindow):
             self._swap_shortcut.setKey(QKeySequence(swap_seq))
 
         if hasattr(self, "_btn_swap"):
-            self._btn_swap.setToolTip(f"Swap languages and text ({swap_seq})")
+            self._btn_swap.setToolTip(tr("swap_tooltip", shortcut=swap_seq))
 
     def apply_locale(self, locale: str | None = None) -> None:
         """Apply active locale strings to all Main Window widgets."""
@@ -1537,8 +1530,8 @@ class MainWindow(QMainWindow):
         self._is_recording = True
         self._btn_mic.setProperty("active", "true")
         self._btn_mic.setStyle(self._btn_mic.style())
-        self._btn_mic.setText("🔴 Listening…")
-        self._status_bar.showMessage("Listening… Speak into your microphone")
+        self._btn_mic.setText(tr("listening_btn"))
+        self._status_bar.showMessage(tr("listening_hint"))
 
         self._voice_worker = VoiceInputWorker(language_code=src_code, parent=self)
         self._voice_worker.text_captured.connect(self._on_voice_text_captured)
@@ -1595,15 +1588,16 @@ class MainWindow(QMainWindow):
 
     def _on_tts_state_changed(self, role: str, is_playing: bool) -> None:
         """Update Speaker button icon color and active state during playback."""
-        active_color = "#3B82F6"
-        inactive_color = "#A1A1AA"
+        palette = get_theme_palette(self._manager.get_theme())
+        active_color = palette.get("accent", "#3B82F6")
+        inactive_color = palette.get("text_muted", palette.get("text_secondary", "#A1A1AA"))
         btn = self._btn_tts_source if role == "source" else self._btn_tts_target
 
         if is_playing:
             btn.setProperty("active", "true")
             btn.setIcon(create_svg_icon("speaker", color=active_color, size=16))
             btn.setStyle(btn.style())
-            self._status_bar.showMessage(f"Playing audio ({role})…")
+            self._status_bar.showMessage(tr("playing_audio", role=role))
         else:
             btn.setProperty("active", "false")
             btn.setIcon(create_svg_icon("speaker", color=inactive_color, size=16))
@@ -1611,7 +1605,7 @@ class MainWindow(QMainWindow):
 
     def _on_tts_error(self, role: str, message: str) -> None:
         """Handle and display TTS playback errors."""
-        self._status_bar.showMessage(f"Audio error: {message}", 4000)
+        self._status_bar.showMessage(tr("audio_error", msg=message), 4000)
 
     def _on_voice_text_captured(self, text: str) -> None:
         """Append transcribed speech to source text and move cursor."""
@@ -1625,11 +1619,11 @@ class MainWindow(QMainWindow):
         cursor = self._txt_source.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.End)
         self._txt_source.setTextCursor(cursor)
-        self._status_bar.showMessage("Voice input captured", 3000)
+        self._status_bar.showMessage(tr("voice_captured"), 3000)
 
     def _on_voice_error(self, error_msg: str) -> None:
         """Display voice input errors in status bar."""
-        self._status_bar.showMessage(f"Voice error: {error_msg}", 5000)
+        self._status_bar.showMessage(tr("voice_error", msg=error_msg), 5000)
 
     def _on_voice_finished(self) -> None:
         """Reset microphone button state on completion and cleanup worker."""
@@ -1642,7 +1636,7 @@ class MainWindow(QMainWindow):
         self._is_recording = False
         self._btn_mic.setProperty("active", "false")
         self._btn_mic.setStyle(self._btn_mic.style())
-        self._btn_mic.setText("🎙 Voice")
+        self._btn_mic.setText(f"🎙 {tr('voice')}")
 
     def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
         super().resizeEvent(event)

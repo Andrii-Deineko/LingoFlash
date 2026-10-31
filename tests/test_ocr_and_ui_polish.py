@@ -168,8 +168,10 @@ class TestQuitButtonAndUI(unittest.TestCase):
         btn_quit = dlg.findChild(QPushButton, "quitAppBtn")
         self.assertIsNotNone(btn_quit)
         self.assertIn("Quit", btn_quit.text())
-        qss = btn_quit.styleSheet()
-        self.assertIn("#dc2626", qss)  # Red background
+        self.assertEqual(btn_quit.objectName(), "quitAppBtn")
+        qss = get_stylesheet("dark")
+        self.assertIn("QPushButton#quitAppBtn", qss)
+        self.assertIn("#dc2626", qss)  # Red background defined in themes QSS
 
     def test_quit_button_triggers_clean_quit_and_ipc_cleanup(self) -> None:
         """Verify clicking Quit button invokes quit callback and socket cleanup."""
@@ -178,7 +180,7 @@ class TestQuitButtonAndUI(unittest.TestCase):
         dlg = SettingsDialog(mgr, on_quit=mock_quit)
 
         # Create dummy socket file to test cleanup
-        sock_test = "/tmp/LingoFlash"
+        sock_test = os.path.join(tempfile.gettempdir(), "LingoFlash")
         try:
             with open(sock_test, "w") as f:
                 f.write("test")

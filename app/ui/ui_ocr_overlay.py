@@ -23,6 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from app.clipboard.clipboard_manager import ClipboardManager
+from app.utils.i18n import tr
 
 logger = logging.getLogger(__name__)
 
@@ -50,20 +51,7 @@ class TranslatedBubbleCard(QFrame):
     def _setup_ui(self) -> None:
         self.setObjectName("ocrBubbleCard")
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(f"Original: {self._original}\n(Click to copy translation)")
-
-        # Frosted dark floating style with subtle border
-        self.setStyleSheet("""
-            QFrame#ocrBubbleCard {
-                background-color: rgba(18, 18, 24, 0.94);
-                border: 1px solid rgba(255, 255, 255, 0.18);
-                border-radius: 8px;
-            }
-            QFrame#ocrBubbleCard:hover {
-                background-color: rgba(26, 26, 36, 0.98);
-                border: 1px solid #3b82f6;
-            }
-        """)
+        self.setToolTip(tr("ocr_tooltip", original=self._original))
 
         # Drop shadow for clean pop from game/comic background
         shadow = QGraphicsDropShadowEffect(self)
@@ -78,21 +66,13 @@ class TranslatedBubbleCard(QFrame):
 
         # Translated text
         self._lbl_text = QLabel(self._translated, self)
+        self._lbl_text.setObjectName("ocrCardText")
         self._lbl_text.setWordWrap(True)
-        self._lbl_text.setStyleSheet("""
-            QLabel {
-                color: #ffffff;
-                font-size: 13px;
-                font-weight: 500;
-                background: transparent;
-                border: none;
-            }
-        """)
         layout.addWidget(self._lbl_text)
 
         # Subtle copy badge on click
         self._lbl_copied = QLabel("", self)
-        self._lbl_copied.setStyleSheet("color: #60a5fa; font-size: 10px; font-weight: 600; background: transparent;")
+        self._lbl_copied.setObjectName("ocrCopiedBadge")
         self._lbl_copied.hide()
         layout.addWidget(self._lbl_copied)
 
@@ -101,7 +81,7 @@ class TranslatedBubbleCard(QFrame):
             self.copy_requested.emit(self._translated)
             if self.receivers(self.copy_requested) == 0:
                 self._clipboard.copy_to_clipboard(self._translated)
-            self._lbl_copied.setText("✓ Copied!")
+            self._lbl_copied.setText(tr("copied"))
             self._lbl_copied.show()
             QTimer.singleShot(1500, self._lbl_copied.hide)
             event.accept()
@@ -129,6 +109,7 @@ class OCROverlayWindow(QWidget):
         self._populate_bubbles()
 
     def _setup_window(self) -> None:
+        self.setObjectName("overlayBackdrop")
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
@@ -161,51 +142,25 @@ class OCROverlayWindow(QWidget):
             self.setGeometry(max(0, c_pos.x() - 300), max(0, c_pos.y() - 200), 650, 450)
             self._offset = (20, 50)
 
-        # Subtle dark translucent backdrop
-        self.setStyleSheet("""
-            QWidget#overlayBackdrop {
-                background-color: rgba(10, 10, 14, 0.45);
-            }
-        """)
-
     def _populate_bubbles(self) -> None:
         ox, oy = self._offset
 
         # 1. Floating top banner
         banner = QFrame(self)
         banner.setObjectName("overlayBanner")
-        banner.setStyleSheet("""
-            QFrame#overlayBanner {
-                background-color: rgba(15, 15, 20, 0.95);
-                border: 1px solid rgba(255, 255, 255, 0.15);
-                border-radius: 10px;
-            }
-        """)
         banner_layout = QHBoxLayout(banner)
         banner_layout.setContentsMargins(12, 6, 12, 6)
         banner_layout.setSpacing(10)
 
-        lbl_icon = QLabel("🎮 Comic / Game OCR Mode", banner)
-        lbl_icon.setStyleSheet("color: #60a5fa; font-weight: 600; font-size: 12px; background: transparent;")
+        lbl_icon = QLabel(tr("ocr_mode_banner"), banner)
+        lbl_icon.setObjectName("overlayIcon")
 
-        lbl_hint = QLabel("• Click any bubble to copy • Press Esc to close", banner)
-        lbl_hint.setStyleSheet("color: #a1a1aa; font-size: 11px; background: transparent;")
+        lbl_hint = QLabel(tr("ocr_mode_hint"), banner)
+        lbl_hint.setObjectName("overlayHint")
 
         btn_close = QPushButton("✕", banner)
+        btn_close.setObjectName("overlayCloseBtn")
         btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_close.setStyleSheet("""
-            QPushButton {
-                background: transparent;
-                color: #d4d4d8;
-                font-weight: bold;
-                padding: 2px 6px;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background: rgba(255, 255, 255, 0.1);
-                color: #ffffff;
-            }
-        """)
         btn_close.clicked.connect(self.close)
 
         banner_layout.addWidget(lbl_icon)
