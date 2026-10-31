@@ -14,7 +14,7 @@ import os
 import re
 import threading
 from abc import ABC, abstractmethod
-from concurrent.futures import ThreadPoolExecutor, TimeoutError
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,7 @@ import requests
 from requests.adapters import HTTPAdapter
 
 from app.utils.shortcuts import DEFAULT_SHORTCUTS
+from app.utils.json_utils import safe_load_json, safe_save_json
 
 logger = logging.getLogger(__name__)
 
@@ -1182,35 +1183,16 @@ class TranslationManager:
 
     def save_config(self) -> None:
         """Write the current configuration to disk atomically."""
-        self._config_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp_file = self._config_file.with_suffix(".tmp")
-        try:
-            tmp_file.write_text(
-                json.dumps(self._config, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            tmp_file.replace(self._config_file)
-            logger.debug("Config saved to %s", self._config_file)
-        except OSError:
-            logger.exception("Failed to save config")
-            if tmp_file.is_file():
-                try:
-                    tmp_file.unlink()
-                except OSError:
-                    pass
+        safe_save_json(self._config_file, self._config)
 
     def load_config(self) -> None:
         """Read configuration from disk (no-op if the file doesn't exist)."""
-        if self._config_file.is_file():
-            try:
-                self._config = json.loads(
-                    self._config_file.read_text(encoding="utf-8")
-                )
-                logger.debug("Config loaded from %s", self._config_file)
-            except (json.JSONDecodeError, OSError):
-                logger.exception("Failed to load config; using defaults")
-                self._config = {}
+        data = safe_load_json(self._config_file, default={})
+        if isinstance(data, dict):
+            self._config = data
+            logger.debug("Config loaded from %s", self._config_file)
         else:
+            logger.warning("Config root in %s is not a dict; using defaults", self._config_file)
             self._config = {}
 
     # -- internals ---------------------------------------------------------
@@ -1478,40 +1460,17 @@ class TranslationHistory:
 
     def _load(self) -> None:
         """Load history from disk."""
-        if self._history_file.is_file():
-            try:
-                data = json.loads(
-                    self._history_file.read_text(encoding="utf-8")
-                )
-                if isinstance(data, list):
-                    self._entries = data[-self._max_entries :]
-                else:
-                    self._entries = []
-                logger.debug(
-                    "Loaded %d history entries from %s",
-                    len(self._entries),
-                    self._history_file,
-                )
-            except (json.JSONDecodeError, OSError):
-                logger.exception("Failed to load history; starting fresh")
-                self._entries = []
+        data = safe_load_json(self._history_file, default=[])
+        if isinstance(data, list):
+            self._entries = data[-self._max_entries :]
         else:
             self._entries = []
+        logger.debug(
+            "Loaded %d history entries from %s",
+            len(self._entries),
+            self._history_file,
+        )
 
     def _save(self) -> None:
         """Persist history to disk atomically."""
-        self._history_file.parent.mkdir(parents=True, exist_ok=True)
-        tmp_file = self._history_file.with_suffix(".tmp")
-        try:
-            tmp_file.write_text(
-                json.dumps(self._entries, indent=2, ensure_ascii=False),
-                encoding="utf-8",
-            )
-            tmp_file.replace(self._history_file)
-        except OSError:
-            logger.exception("Failed to save history")
-            if tmp_file.is_file():
-                try:
-                    tmp_file.unlink()
-                except OSError:
-                    pass
+        safe_save_json(self._history_file, self._entries)

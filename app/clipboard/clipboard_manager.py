@@ -7,7 +7,6 @@ auto-detecting the active session from environment variables.
 import logging
 import os
 import subprocess
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +242,7 @@ class ClipboardManager:
             return ""
         except subprocess.TimeoutExpired:
             logger.warning(
-                "Clipboard read timed out after %d s.",
+                "Clipboard read timed out after %.1f s.",
                 self._SUBPROCESS_TIMEOUT,
             )
             return ""

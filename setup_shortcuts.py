@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 from app.translation.translator import TranslationManager
 from app.utils.shortcuts import apply_gnome_shortcuts

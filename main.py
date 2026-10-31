@@ -20,7 +20,7 @@ from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
 
 from app.ipc.server import IPCServer
 from app.clipboard.clipboard_manager import ClipboardManager
-from app.ocr.ocr_engine import ScreenCapture, OCREngine, OCRWorker, OCROverlayWorker
+from app.ocr.ocr_engine import OCRWorker, OCROverlayWorker
 from app.translation.translator import (
     TranslationManager,
     TranslationWorker,
@@ -29,9 +29,9 @@ from app.translation.translator import (
 from app.ui.ui_popup import TranslationPopup
 from app.ui.ui_ocr_overlay import OCROverlayWindow
 from app.ui.ui_main import MainWindow, SettingsDialog
-from app.utils.theme import detect_system_theme, get_stylesheet, get_app_icon
+from app.utils.theme import get_stylesheet, get_app_icon
 from app.utils.shortcuts import apply_gnome_shortcuts
-from app.utils.i18n import tr, set_current_locale, get_current_locale
+from app.utils.i18n import tr, set_current_locale
 from app.utils.text import strip_formatting
 
 logger = logging.getLogger(__name__)
@@ -266,8 +266,11 @@ class LingoFlashApp:
             self._main_window._open_settings()
         else:
             dlg = SettingsDialog(self._translation_manager, on_quit=self._quit)
-            dlg.quit_requested.connect(self._quit)
-            dlg.exec()
+            try:
+                dlg.quit_requested.connect(self._quit)
+                dlg.exec()
+            finally:
+                dlg.deleteLater()
         if hasattr(self, "_popup") and self._popup is not None:
             self._popup.apply_font_size(self._translation_manager.get_text_font_size())
 

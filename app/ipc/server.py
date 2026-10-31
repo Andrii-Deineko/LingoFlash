@@ -58,10 +58,12 @@ class IPCServer(QObject):
     def is_already_running(self) -> bool:
         """Check whether another instance is already listening.
 
-        Attempts a blocking connect to the named socket.  If the
-        connection succeeds the other instance is alive and this method
-        returns ``True``.  A failed connection means no instance is
-        running (or the socket file is stale).
+        Why this approach is used:
+        Rather than relying on pidfiles (which can get out of sync or linger after a SIGKILL),
+        we perform a test connection to the domain socket via QLocalSocket.
+        If connection succeeds within 1 second, the primary daemon is confirmed alive.
+        If connection fails, the socket is either dead or orphaned by a previous crash,
+        in which case QLocalServer.removeServer() safely unlinks it for re-binding.
 
         Returns:
             ``True`` if another instance owns the socket.
@@ -88,8 +90,13 @@ class IPCServer(QObject):
     def send_command(self, action: str, env: Optional[dict[str, str]] = None) -> bool:
         """Send a command to the running instance with active environment context.
 
-        Serialises ``{"action": "<action>", "env": {...}}`` as JSON and writes it to
-        the socket of the already-running server.
+        Why environment context is included:
+        When secondary commands (e.g. ``main.py --action translate_selection``) are triggered
+        by GNOME keyboard shortcuts or user terminal sessions, their graphical environment
+        (``WAYLAND_DISPLAY``, ``DISPLAY``, ``DBUS_SESSION_BUS_ADDRESS``) reflects the user's
+        active active desktop. Forwarding this dictionary allows the persistent daemon
+        (which may have been launched at login before the graphical display was fully ready)
+        to synchronize its environment variables before invoking clipboard or screenshot tools.
 
         Args:
             action: The command action string, e.g. ``"translate_selection"``.

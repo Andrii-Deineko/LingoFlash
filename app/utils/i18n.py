@@ -6,10 +6,11 @@ Supports runtime locale switching without requiring application restart.
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 from typing import Any
+
+from app.utils.json_utils import safe_load_json
 
 logger = logging.getLogger(__name__)
 
@@ -47,16 +48,14 @@ def load_locale(locale: str) -> dict[str, str]:
 
     loc_dir = get_locales_directory()
     json_path = loc_dir / f"{locale}.json"
+    data = safe_load_json(json_path, default=None)
 
-    if json_path.is_file():
-        try:
-            data = json.loads(json_path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                _CACHED_STRINGS[locale] = data
-                logger.debug("Loaded locale '%s' (%d strings) from %s", locale, len(data), json_path)
-                return data
-        except Exception as exc:
-            logger.warning("Failed to parse locale file %s: %s", json_path, exc)
+    if isinstance(data, dict):
+        # Enforce string keys and string values
+        clean_strings = {str(k): str(v) for k, v in data.items()}
+        _CACHED_STRINGS[locale] = clean_strings
+        logger.debug("Loaded locale '%s' (%d strings) from %s", locale, len(clean_strings), json_path)
+        return clean_strings
 
     # If fallback fails or file doesn't exist
     if locale != DEFAULT_LOCALE:
@@ -94,12 +93,13 @@ def tr(key: str, locale: str | None = None, **kwargs: Any) -> str:
     elif val is None:
         val = key
 
+    val_str = str(val)
     if kwargs:
         try:
-            return val.format(**kwargs)
+            return val_str.format(**kwargs)
         except Exception:
-            return val
-    return val
+            return val_str
+    return val_str
 
 
 def reload_locales() -> None:

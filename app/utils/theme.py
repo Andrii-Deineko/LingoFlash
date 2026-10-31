@@ -8,13 +8,67 @@ Allows live switching at runtime without application restarts.
 
 from __future__ import annotations
 
-import json
 import logging
 from pathlib import Path
 import subprocess
 from typing import Any, Optional
 
+from app.utils.json_utils import safe_load_json
+
 logger = logging.getLogger(__name__)
+
+# Fallback palettes in case assets/themes.json is missing or corrupted
+_FALLBACK_THEMES: dict[str, dict[str, Any]] = {
+    "dark": {
+        "name": "Dark",
+        "is_dark": True,
+        "bg_base": "#18181B",
+        "bg_surface": "#27272A",
+        "bg_elevated": "#3F3F46",
+        "fg_primary": "#F4F4F5",
+        "fg_secondary": "#A1A1AA",
+        "fg_muted": "#71717A",
+        "accent": "#3B82F6",
+        "accent_hover": "#2563EB",
+        "border_subtle": "#3F3F46",
+    },
+    "light": {
+        "name": "Light",
+        "is_dark": False,
+        "bg_base": "#FFFFFF",
+        "bg_surface": "#F4F4F5",
+        "bg_elevated": "#E4E4E7",
+        "fg_primary": "#18181B",
+        "fg_secondary": "#52525B",
+        "fg_muted": "#71717A",
+        "accent": "#2563EB",
+        "accent_hover": "#1D4ED8",
+        "border_subtle": "#E4E4E7",
+    },
+}
+
+_FALLBACK_QSS = """
+QWidget {
+    background-color: {bg_base};
+    color: {fg_primary};
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: {ui_sz}pt;
+}
+QTextEdit, QPlainTextEdit {
+    background-color: {bg_surface};
+    color: {fg_primary};
+    border: {card_border};
+    border-radius: 8px;
+    font-size: {txt_sz}pt;
+}
+QPushButton {
+    background-color: {accent};
+    color: #ffffff;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 14px;
+}
+"""
 
 # Search paths for themes.json
 _THEME_SEARCH_PATHS: list[Path] = [
@@ -36,26 +90,29 @@ def get_themes_json_path() -> Path:
 
 
 def load_themes_data() -> tuple[dict[str, dict[str, Any]], str]:
-    """Load themes and QSS template from assets/themes.json."""
+    """Load themes and QSS template from assets/themes.json with resilient fallback."""
     global _CACHED_THEMES, _CACHED_QSS_TEMPLATE
     if _CACHED_THEMES and _CACHED_QSS_TEMPLATE:
         return _CACHED_THEMES, _CACHED_QSS_TEMPLATE
 
     json_path = get_themes_json_path()
-    if json_path.is_file():
-        try:
-            data = json.loads(json_path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                themes = data.get("themes", {})
-                template = data.get("qss_template", "")
-                if isinstance(themes, dict) and themes:
-                    _CACHED_THEMES = themes
-                if isinstance(template, str) and template:
-                    _CACHED_QSS_TEMPLATE = template
-                logger.debug("Loaded %d themes from %s", len(_CACHED_THEMES), json_path)
-                return _CACHED_THEMES, _CACHED_QSS_TEMPLATE
-        except Exception as exc:
-            logger.warning("Failed to load themes.json from %s: %s", json_path, exc)
+    data = safe_load_json(json_path, default={})
+    if isinstance(data, dict):
+        themes = data.get("themes", {})
+        template = data.get("qss_template", "")
+        if isinstance(themes, dict) and themes:
+            _CACHED_THEMES = themes
+        if isinstance(template, str) and template:
+            _CACHED_QSS_TEMPLATE = template
+        if _CACHED_THEMES and _CACHED_QSS_TEMPLATE:
+            logger.debug("Loaded %d themes from %s", len(_CACHED_THEMES), json_path)
+            return _CACHED_THEMES, _CACHED_QSS_TEMPLATE
+
+    # Fallback if themes.json was missing or corrupted
+    if not _CACHED_THEMES:
+        _CACHED_THEMES = dict(_FALLBACK_THEMES)
+    if not _CACHED_QSS_TEMPLATE:
+        _CACHED_QSS_TEMPLATE = _FALLBACK_QSS
 
     return _CACHED_THEMES, _CACHED_QSS_TEMPLATE
 

@@ -6,13 +6,12 @@ import logging
 from typing import Optional, Any
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPoint
-from PyQt6.QtGui import QCursor, QGuiApplication, QKeyEvent, QMouseEvent, QColor
+from PyQt6.QtGui import QCursor, QGuiApplication, QKeyEvent, QMouseEvent, QColor, QCloseEvent, QHideEvent
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
     QLabel,
-    QTextEdit,
     QPushButton,
     QFrame,
     QGraphicsDropShadowEffect,
@@ -22,7 +21,6 @@ from app.clipboard.clipboard_manager import ClipboardManager
 from app.ui.ui_main import LANGUAGES, SearchableComboBox, PlainTextEdit
 from app.utils.i18n import tr
 from app.utils.theme import get_app_icon
-from app.utils.text import strip_formatting
 
 logger = logging.getLogger(__name__)
 
@@ -465,12 +463,12 @@ class TranslationPopup(QWidget):
         self._drag_position = QPoint()
         super().mouseReleaseEvent(event)
 
-    def closeEvent(self, event) -> None:  # noqa: ANN001, N802
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
         """Ensure closing safely hides the popup and never destroys the widget."""
         self.dismiss()
         event.ignore()
 
-    def hideEvent(self, event) -> None:  # noqa: ANN001, N802
+    def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802
         """Cancel background operations when hidden."""
         self._debounce_timer.stop()
         self._loading_timer.stop()

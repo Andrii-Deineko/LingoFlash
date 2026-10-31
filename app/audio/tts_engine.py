@@ -290,9 +290,11 @@ class TTSManager(QObject):
         """Stop any active audio playback immediately."""
         if self._active_worker is not None:
             old_role = self._active_role
+            worker = self._active_worker
             try:
-                self._active_worker.stop()
-                self._active_worker.wait(200)
+                worker.stop()
+                worker.wait(200)
+                worker.deleteLater()
             except RuntimeError:
                 pass
             finally:
@@ -333,6 +335,11 @@ class TTSManager(QObject):
 
     def _on_finished(self, role: str) -> None:
         if self._active_role == role:
+            if self._active_worker is not None:
+                try:
+                    self._active_worker.deleteLater()
+                except RuntimeError:
+                    pass
             self._active_worker = None
             self._active_role = ""
         self.state_changed.emit(role, False)

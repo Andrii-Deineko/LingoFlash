@@ -11,8 +11,7 @@ import os
 import re
 import shutil
 import subprocess
-from pathlib import Path
-from typing import Optional
+from typing import Optional, Any
 
 import pytesseract
 from PIL import Image, ImageEnhance
@@ -49,7 +48,16 @@ class ScreenCapture:
 
     @classmethod
     def get_session_env(cls) -> dict[str, str]:
-        """Construct a complete, active graphical session environment for subprocesses."""
+        """Construct a complete, active graphical session environment for subprocesses.
+
+        Why this is necessary:
+        When LingoFlash is triggered via global keyboard shortcuts (GNOME Settings Daemon,
+        systemd user slice, or daemon autostart), subprocesses are often spawned in a
+        sanitized execution environment missing essential display variables like
+        ``WAYLAND_DISPLAY``, ``DBUS_SESSION_BUS_ADDRESS``, or ``XDG_RUNTIME_DIR``.
+        Without these variables, screenshot tools fail with 'cannot open display' errors.
+        This helper reconstructs the active session context dynamically.
+        """
         env = os.environ.copy()
         uid = os.getuid()
         runtime_dir = env.get("XDG_RUNTIME_DIR") or f"/run/user/{uid}"
@@ -169,13 +177,20 @@ class ScreenCapture:
 
     @classmethod
     def capture_region(cls, output_path: str = DEFAULT_OCR_IMAGE) -> Optional[str]:
-        """Capture a user-selected screen region to a PNG file.
+        """Capture a user-selected screen region to a PNG file across Linux environments.
 
-        On GNOME Wayland (Fedora), executes ``gnome-screenshot -a -f <path>``
-        using ``subprocess.run()`` with ``env=os.environ.copy()``. If that fails
-        or produces no image, falls back to the native GNOME Shell DBus API
-        (``SelectArea``). Completely blocks and waits for the user to finish
-        drawing the box.
+        Why this architecture is chosen:
+        Modern Wayland compositors isolate applications and do not allow client windows
+        to read raw framebuffers directly. Screen-region capture must therefore delegate
+        to compositor-native tools or freedesktop portals:
+        1. GNOME Wayland: ``gnome-screenshot -a -f <path>`` or DBus ``SelectArea`` (native
+           modal selection without requiring root privileges).
+        2. KDE Plasma: ``spectacle -r -b -n -o <path>`` (built-in region capture).
+        3. Wlroots (Sway/Hyprland): ``grim -g "$(slurp)" <path>`` (standard wlroots protocol).
+        4. X11 Fallbacks: ``scrot -s`` or ``maim -s`` (standard X11 selection capture).
+
+        Execution is synchronous and blocking so the user has time to drag-select an area
+        before OCR processing begins.
 
         Args:
             output_path: Target PNG file path (defaults to ``/tmp/lingo_ocr.png``).

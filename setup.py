@@ -1,9 +1,5 @@
 """Setup script for LingoFlash desktop translation client."""
 
-import os
-import sys
-from pathlib import Path
-import os
 import sys
 from pathlib import Path
 

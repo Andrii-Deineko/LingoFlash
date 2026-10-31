@@ -10,8 +10,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional
 
-from PyQt6.QtCore import Qt, QPoint, QRect, QTimer, pyqtSignal
-from PyQt6.QtGui import QColor, QFont, QCursor, QKeyEvent, QMouseEvent
+from PyQt6.QtCore import Qt, QRect, QTimer, pyqtSignal
+from PyQt6.QtGui import QColor, QCursor, QKeyEvent, QMouseEvent
 from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -20,8 +20,6 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QFrame,
     QGraphicsDropShadowEffect,
-    QApplication,
-    QScrollArea,
 )
 
 from app.clipboard.clipboard_manager import ClipboardManager
@@ -137,6 +135,7 @@ class OCROverlayWindow(QWidget):
             | Qt.WindowType.Tool
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
 
         # Position overlay over captured region or near cursor
         if self._screen_rect is not None:

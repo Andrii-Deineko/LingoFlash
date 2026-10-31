@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Optional, Callable
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QEvent, QSize, QMimeData
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QEvent, QSize, QMimeData, QObject
 from PyQt6.QtGui import (
     QIcon,
     QCloseEvent,
@@ -14,6 +14,7 @@ from PyQt6.QtGui import (
     QShortcut,
     QResizeEvent,
     QShowEvent,
+    QFocusEvent,
 )
 from PyQt6.QtWidgets import (
     QMainWindow,
@@ -40,7 +41,6 @@ from PyQt6.QtWidgets import (
     QKeySequenceEdit,
     QApplication,
     QSpinBox,
-    QStyle,
     QCheckBox,
 )
 
@@ -178,7 +178,16 @@ class SearchableComboBox(QComboBox):
         self.setItemData(idx, code, Qt.ItemDataRole.UserRole)
 
     def get_selected_code(self) -> str:
-        """Strictly retrieve the internal standard language code (UserRole), never the display text."""
+        """Strictly retrieve the internal standard language code (UserRole), never the display text.
+
+        Why this reconciliation logic exists:
+        Languages have both an internal standard code (e.g. 'en', 'uk', 'sv') stored in
+        UserRole, and a localized display name (e.g. 'English', 'Українська', 'Svenska')
+        in DisplayRole. If a user manually types into the editable box, they may type either
+        the ISO code or the localized language name. This method cross-checks UserRole codes
+        first, then DisplayRole names, guaranteeing that translation requests always receive
+        a valid ISO code rather than localized display text.
+        """
         # 1. Check if line edit text differs from currently selected item text (user typed custom search)
         line_edit = self.lineEdit()
         if line_edit is not None:
@@ -240,13 +249,13 @@ class SearchableComboBox(QComboBox):
             return self.get_selected_code()
         return val
 
-    def eventFilter(self, watched, event) -> bool:  # noqa: ANN001
+    def eventFilter(self, watched: Optional[QObject], event: Optional[QEvent]) -> bool:  # noqa: N802
         """Auto-select all text on click for instant search replacement."""
-        if watched == self.lineEdit() and event.type() == QEvent.Type.MouseButtonPress:
+        if watched == self.lineEdit() and event is not None and event.type() == QEvent.Type.MouseButtonPress:
             QTimer.singleShot(0, self.lineEdit().selectAll)
         return super().eventFilter(watched, event)
 
-    def focusInEvent(self, event) -> None:  # noqa: ANN001
+    def focusInEvent(self, event: Optional[QFocusEvent]) -> None:  # noqa: N802
         super().focusInEvent(event)
         if self.lineEdit() is not None:
             QTimer.singleShot(0, self.lineEdit().selectAll)
@@ -262,7 +271,14 @@ class SearchableComboBox(QComboBox):
             self.setEditText(self.itemText(idx))
 
     def _validate_and_reconcile(self) -> None:
-        """Validate input text against supported languages. Revert to last valid selection if invalid."""
+        """Validate input text against supported languages. Revert to last valid selection if invalid.
+
+        Why this fallback is essential:
+        If a user accidentally types random or unmatched characters in the editable combo box,
+        leaving that text in place would submit invalid language codes to translation APIs.
+        This reconciler finds the closest match (exact code -> exact name -> prefix -> substring),
+        and if none matches, safely reverts to the last known valid item index without crashing.
+        """
         text = self.currentText().strip()
         if not text:
             self.setCurrentIndex(self._last_valid_index)
@@ -1487,19 +1503,22 @@ class MainWindow(QMainWindow):
     def _open_settings(self) -> None:
         """Open settings dialog."""
         dlg = SettingsDialog(self._manager, self, on_quit=self.quit_app_requested.emit)
-        dlg.quit_requested.connect(self.quit_app_requested.emit)
-        dlg.font_size_changed.connect(self.apply_font_size)
-        dlg.locale_changed.connect(self.apply_locale)
-        if dlg.exec() == QDialog.DialogCode.Accepted:
-            chosen_locale = self._manager.get_interface_language()
-            self.apply_locale(chosen_locale)
-            self.locale_changed.emit(chosen_locale)
-            self.apply_font_size(self._manager.get_text_font_size())
-            self._update_status_bar()
-            self._init_swap_shortcut()
-            self._trigger_translation(force=True)
-        else:
-            self.apply_locale(self._manager.get_interface_language())
+        try:
+            dlg.quit_requested.connect(self.quit_app_requested.emit)
+            dlg.font_size_changed.connect(self.apply_font_size)
+            dlg.locale_changed.connect(self.apply_locale)
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                chosen_locale = self._manager.get_interface_language()
+                self.apply_locale(chosen_locale)
+                self.locale_changed.emit(chosen_locale)
+                self.apply_font_size(self._manager.get_text_font_size())
+                self._update_status_bar()
+                self._init_swap_shortcut()
+                self._trigger_translation(force=True)
+            else:
+                self.apply_locale(self._manager.get_interface_language())
+        finally:
+            dlg.deleteLater()
 
     # --- Voice Input (Speech-to-Text) ---
 
@@ -1531,9 +1550,12 @@ class MainWindow(QMainWindow):
     def _stop_voice_input(self) -> None:
         """Stop active microphone worker."""
         try:
-            if self._voice_worker is not None and self._voice_worker.isRunning():
-                self._voice_worker.stop()
-                self._voice_worker.wait(150)
+            if self._voice_worker is not None:
+                worker = self._voice_worker
+                if worker.isRunning():
+                    worker.stop()
+                    worker.wait(150)
+                worker.deleteLater()
         except RuntimeError:
             pass
         finally:
@@ -1610,7 +1632,13 @@ class MainWindow(QMainWindow):
         self._status_bar.showMessage(f"Voice error: {error_msg}", 5000)
 
     def _on_voice_finished(self) -> None:
-        """Reset microphone button state on completion."""
+        """Reset microphone button state on completion and cleanup worker."""
+        if self._voice_worker is not None:
+            try:
+                self._voice_worker.deleteLater()
+            except RuntimeError:
+                pass
+            self._voice_worker = None
         self._is_recording = False
         self._btn_mic.setProperty("active", "false")
         self._btn_mic.setStyle(self._btn_mic.style())
